@@ -45,17 +45,20 @@ Such features must be provided by the cube app.
 
 Add the package `@variocube/cube-app-sdk` to your web application and use it to interface with the Variocube locker.
 
+### Connecting to the Variocube locker
+
 A single call to the `connect` function provides access to all platform features:
 
-```typescript
-import {connect} from "@variocube/cube-app-sdk";
-
-const cube = connect();
-```
+https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/open-lock.ts#L1-L4
 
 ### Opening a compartment
 
-
+https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/open-lock.ts#L6-L12
 
 ### Retrieving a code event
 
+https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/code.ts#L6-L14
+
+### Retrieving compartments
+
+https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/compartments.ts#L6-L10
