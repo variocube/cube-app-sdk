@@ -11,8 +11,8 @@
     "type": "git",
     "url": "git+https://github.com/variocube/cube-app-sdk.git"
   },
-  "author": "Peter Karrer",
-  "license": "ISC",
+  "author": "Variocube GmbH",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/variocube/cube-app-sdk/issues"
   },
