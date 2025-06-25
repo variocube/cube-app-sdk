@@ -7,9 +7,10 @@
     "target": "ES2022",
     "jsx": "react",
     "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "skipLibCheck": true
   },
-  "include": ["src/**",
-    "examples/**"
+  "exclude": [
+    "node_modules/**/*"
   ]
 }

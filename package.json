@@ -5,7 +5,9 @@
   "main": "esm/index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "lerna run build",
+    "dev": "lerna run dev",
+    "test": "lerna run test"
   },
   "repository": {
     "type": "git",
@@ -17,8 +19,18 @@
     "url": "https://github.com/variocube/cube-app-sdk/issues"
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
-  "dependencies": {
-    "@variocube/driver-common": "^2.1.1",
-    "typescript": "^5.7.3"
-  }
+  "devDependencies": {
+    "@liuli-util/vite-plugin-node": "^0.10.0",
+    "@types/yargs": "^17.0.33",
+    "lerna": "^8.2.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.3.5"
+  },
+  "workspaces": [
+    "packages/cube-app-sdk",
+    "packages/cube-app-service",
+    "packages/cube-app-demo"
+  ],
+  "dependencies": {}
 }
