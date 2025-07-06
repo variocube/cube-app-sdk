@@ -1,5 +1,6 @@
 import {CloseEvent, CodeEvent, Compartment, Cube, EventListener, LockEvent, OpenEvent} from "./types";
 import {VcmpClient} from "@variocube/vcmp";
+import {CompartmentsMessage, LockMessage} from "./messages";
 
 type EventMap = {
     "code": CodeEvent,
@@ -35,9 +36,10 @@ export class CubeImpl implements Cube {
         });
         this.client.onOpen = () => this.dispatchEvent("open", {});
         this.client.onClose = () => this.dispatchEvent("close", {});
-        this.client.on("compartments", ({compartments}: {compartments: Compartment[]}) => {
+        this.client.on<CompartmentsMessage>("compartments", ({compartments}) => {
             this.compartments = compartments;
         });
+        this.client.on<LockMessage>("lock", e => this.dispatchEvent("lock", e));
     }
 
     private dispatchEvent<E extends keyof EventListenerTypeMap>(eventName: E, event: EventMap[E]) {
@@ -77,10 +79,10 @@ export class CubeImpl implements Cube {
     }
 
     getCompartment(compartmentNumber: string) {
-        return this.compartments.find(compartment => compartment.number === compartmentNumber);
+        return this.compartments.find(compartment => compartment.number == compartmentNumber);
     }
 
     getCompartments() {
-        return this.compartments;
+        return [...this.compartments];
     }
 }

@@ -51,6 +51,7 @@ const argv = await yargs()
     .alias("h", "help")
     .parse(hideBin(process.argv));
 
+// const controller = argv.mock ?
 const server = new Server();
 
 process.on("SIGINT", () => server.stop());
