@@ -14,3 +14,13 @@ export interface CompartmentsMessage extends VcmpMessage {
   "@type": 'compartments';
   compartments: Compartment[];
 }
+
+export interface RestartMessage extends VcmpMessage {
+  "@type": 'restart';
+}
+
+export interface CodeMessage extends VcmpMessage {
+  "@type": 'code';
+  code: string;
+  source: "KEYPAD" | "SCANNER" | "NFC";
+}

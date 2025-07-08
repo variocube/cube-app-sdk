@@ -1,7 +1,8 @@
 import {VcmpServer} from "@variocube/vcmp-server";
-import {CompartmentsMessage, LockMessage, OpenLockMessage} from "@variocube/cube-app-sdk";
-import { createServer } from 'http';
+import {CodeMessage, CompartmentsMessage, LockMessage, OpenLockMessage, RestartMessage} from "@variocube/cube-app-sdk";
+import {createServer} from 'http';
 import {WebSocketServer} from "ws";
+import {serveMockUi} from "./serveMockUi";
 
 export class Server {
 
@@ -15,8 +16,10 @@ export class Server {
         const mockWebSocketServer = new WebSocketServer({ noServer: true });
         const appWebSocketServer = new WebSocketServer({ noServer: true });
 
+        this.webServer.on("request", serveMockUi);
+
         this.webServer.on("upgrade", (request, socket, head) => {
-            const { pathname } = new URL(request.url ?? "", "ws://localhost:5000");
+            const { pathname } = new URL(request.url ?? "", "http://localhost:5000");
             const wss = (pathname.startsWith("/mock")) ? mockWebSocketServer : appWebSocketServer;
             wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws, request));
         });
@@ -49,6 +52,9 @@ export class Server {
             console.log(`Open lock`, message);
             this.mockServer.broadcast(message);
         });
+        this.appServer.on<RestartMessage>("restart", message => {
+            this.mockServer.broadcast(message);
+        });
 
         this.mockServer.on<CompartmentsMessage>("compartments", message => {
             console.log(`Compartments`, message);
@@ -58,9 +64,17 @@ export class Server {
         this.mockServer.on<LockMessage>("lock", message => {
             console.log(`Lock`, message);
             this.appServer.broadcast(message);
-        })
+        });
 
-        this.webServer.listen(5000);
+        this.mockServer.on<CodeMessage>("code", message => {
+            console.log("Code", message);
+            this.appServer.broadcast(message);
+        });
+
+        this.webServer.listen(5000, () => {
+            console.log("Listening on port 5000.");
+            console.log("Open http://localhost:5000/ to start the virtual cube.");
+        });
     }
 
     async stop() {
@@ -71,6 +85,7 @@ export class Server {
 
     private closeWebserver() {
         return new Promise<void>((resolve, reject) => {
+
             this.webServer.close(err => {
                 if (err) {
                     reject(err);

@@ -24,7 +24,9 @@ function App() {
         <div>
             <h1>Hello World!</h1>
             <div>
-
+                <button onClick={() => cube.restart()}>
+                    Restart
+                </button>
                 <button onClick={openFirstCompartment}>
                     Open First Compartment
                 </button>

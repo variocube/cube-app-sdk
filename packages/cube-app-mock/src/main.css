@@ -30,6 +30,7 @@ body {
 }
 
 .cube {
+    position: relative;
     margin: 16px;
     background-color: #333;
     color: #fff;
@@ -86,4 +87,25 @@ body {
 
 .box.open .door {
     transform: rotateY(45deg);
+}
+
+.restarting {
+    position: absolute;
+    background-color: rgba(0, 0, 0, 0.5);
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    place-items: center;
+    justify-content: center;
+    z-index: 100;
+    color: #fff;
+    font-size: 20px;
+    animation: restarting-animation alternate 1s ease-in-out infinite;
+}
+
+@keyframes restarting-animation {
+    from {opacity: 0.5;}
+    to {opacity: 1;}
 }

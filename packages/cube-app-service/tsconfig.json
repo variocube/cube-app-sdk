@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "esm",
+    "types": ["vite/client"]
   },
   "include": [
     "src/**/*"

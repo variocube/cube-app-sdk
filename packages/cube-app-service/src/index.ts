@@ -54,5 +54,15 @@ const argv = await yargs()
 // const controller = argv.mock ?
 const server = new Server();
 
-process.on("SIGINT", () => server.stop());
-process.on("SIGTERM", () => server.stop());
+async function stop() {
+    try {
+        await server.stop();
+    }
+    catch (error) {
+        console.error("Error while stopping", error);
+    }
+    process.exit(0);
+}
+
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);

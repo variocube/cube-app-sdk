@@ -2,7 +2,7 @@ import React, {StrictMode, useMemo, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./main.css";
 import {VcmpClient} from "@variocube/vcmp";
-import {Compartment, CompartmentsMessage, LockMessage, OpenLockMessage} from "@variocube/cube-app-sdk";
+import {Compartment, CompartmentsMessage, LockMessage, OpenLockMessage, RestartMessage} from "@variocube/cube-app-sdk";
 
 createRoot(document.getElementById('root')!).render(
     <StrictMode>
@@ -30,6 +30,7 @@ function getCompartmentByLock(lock: string) {
 function App() {
 
     const [openLocks, setOpenLocks] = useState(new Set<string>());
+    const [restarting, setRestarting] = useState(false);
 
     const client = useMemo(() => {
         const client = new VcmpClient("ws://localhost:5000/mock", {
@@ -41,6 +42,12 @@ function App() {
                 throw new Error(`Box not found for lock ${lockId}`);
             }
             handleOpen(box);
+        });
+        client.on<RestartMessage>("restart", () => {
+            setRestarting(true);
+            setTimeout(() => {
+                setRestarting(false);
+            }, 5000);
         });
         client.onOpen = () => {
             client.send<CompartmentsMessage>({
@@ -100,6 +107,7 @@ function App() {
                     />
                 ))}
             </div>
+            {restarting && <div className="restarting">Restarting...</div>}
         </div>
     );
 }
