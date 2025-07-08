@@ -1,14 +1,13 @@
 {
   "name": "@variocube/cube-app-sdk",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "SDK for developing apps that run on Variocube lockers.",
   "main": "esm/index.js",
   "type": "module",
   "types": "esm/index.d.ts",
   "scripts": {
     "dev": "tsc -w",
-    "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc"
   },
   "repository": {
     "type": "git",
@@ -25,5 +24,8 @@
   },
   "files": [
     "esm/**"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

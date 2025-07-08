@@ -1,6 +1,6 @@
 {
   "name": "@variocube/cube-app-sdk",
-  "version": "0.0.1",
+  "version": "0.0.0",
   "description": "SDK for developing apps running on Variocube lockers",
   "main": "esm/index.js",
   "type": "module",
