@@ -21,7 +21,7 @@
   "devDependencies": {
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@variocube/vcmp": "^2.1.3",
+    "@variocube/vcmp": "^2.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

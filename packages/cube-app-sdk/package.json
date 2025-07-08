@@ -20,7 +20,7 @@
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "dependencies": {
-    "@variocube/vcmp": "^2.1.3"
+    "@variocube/vcmp": "^2.3.0"
   },
   "files": [
     "esm/**"
