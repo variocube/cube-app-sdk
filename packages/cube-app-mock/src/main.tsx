@@ -29,19 +29,19 @@ function getCompartmentByLock(lock: string) {
 
 function App() {
 
-    const [openLocks, setOpenLocks] = useState(new Set<string>());
+    const [openLocks, setOpenLocks] = useState<string[]>([]);
     const [restarting, setRestarting] = useState(false);
 
     const client = useMemo(() => {
         const client = new VcmpClient("ws://localhost:5000/mock", {
             autoStart: true,
         });
-        client.on<OpenLockMessage>("openLock", ({lockId}) => {
-            const box = getCompartmentByLock(lockId)
-            if (!box) {
+        client.on<OpenLockMessage>("openLock", async ({lockId}) => {
+            const compartment = getCompartmentByLock(lockId)
+            if (!compartment) {
                 throw new Error(`Box not found for lock ${lockId}`);
             }
-            handleOpen(box);
+            await handleOpen(compartment);
         });
         client.on<RestartMessage>("restart", () => {
             setRestarting(true);
@@ -49,8 +49,8 @@ function App() {
                 setRestarting(false);
             }, 5000);
         });
-        client.onOpen = () => {
-            client.send<CompartmentsMessage>({
+        client.onOpen = async () => {
+            await client.send<CompartmentsMessage>({
                 "@type": "compartments",
                 compartments
             });
@@ -58,11 +58,11 @@ function App() {
         return client;
     }, []);
 
-    function handleOpen(compartment: Compartment) {
-        if (!openLocks.has(compartment.lock.id)) {
-            setOpenLocks(new Set([...openLocks, compartment.lock.id]));
+    async function handleOpen(compartment: Compartment) {
+        if (!openLocks.includes(compartment.lock.id)) {
+            setOpenLocks(openLocks => [...openLocks, compartment.lock.id]);
             compartment.lock.status = "OPEN";
-            client.send<LockMessage>({
+            await client.send<LockMessage>({
                 "@type": "lock",
                 lockId: compartment.lock.id,
                 compartmentNumber: compartment.number,
@@ -71,11 +71,11 @@ function App() {
         }
     }
 
-    function handleClose(compartment: Compartment) {
-        if (openLocks.delete(compartment.lock.id)) {
-            setOpenLocks(new Set([...openLocks]));
+    async function handleClose(compartment: Compartment) {
+        if (openLocks.includes(compartment.lock.id)) {
+            setOpenLocks(openLocks => openLocks.filter(lock => lock !== compartment.lock.id));
             compartment.lock.status = "CLOSED";
-            client.send<LockMessage>({
+            await client.send<LockMessage>({
                 "@type": "lock",
                 lockId: compartment.lock.id,
                 compartmentNumber: compartment.number,
@@ -85,10 +85,10 @@ function App() {
     }
 
     const handleCompartmentClick = async (compartment: Compartment) => {
-        if (openLocks.has(compartment.lock.id)) {
-            handleClose(compartment);
+        if (openLocks.includes(compartment.lock.id)) {
+            await handleClose(compartment);
         } else {
-            handleOpen(compartment);
+            await handleOpen(compartment);
         }
     };
 
@@ -102,7 +102,7 @@ function App() {
                     <CompartmentItem
                         key={compartment.number}
                         compartment={compartment}
-                        open={openLocks.has(compartment.lock.id)}
+                        open={openLocks.includes(compartment.lock.id)}
                         onClick={handleCompartmentClick}
                     />
                 ))}

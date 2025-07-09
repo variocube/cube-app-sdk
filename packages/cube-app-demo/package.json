@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "description": "Demo application showcasing the Cube App SDK",
   "main": "esm/index.js",
-  "devDependencies": {},
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build"

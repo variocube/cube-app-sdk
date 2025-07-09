@@ -20,22 +20,29 @@
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
     "@liuli-util/vite-plugin-node": "^0.10.0",
-    "@types/yargs": "^17.0.33",
-    "@types/ws": "^8.18.1",
+    "@mui/material": "^7.2.0",
     "@types/node": "20.14.8",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@types/ws": "^8.18.1",
+    "@types/yargs": "^17.0.33",
+    "@variocube/vcmp": "^2.3.0",
+    "@vitejs/plugin-react": "^4.6.0",
+    "dprint": "^0.50.1",
     "lerna": "^8.2.2",
-    "tsx": "^4.20.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "typescript": "^5.7.3",
     "vite": "^6.3.5",
-    "vite-node": "^3.2.4",
-    "@vitejs/plugin-react": "^4.6.0"
+    "vite-node": "^3.2.4"
   },
   "workspaces": [
     "packages/cube-app-sdk",
     "packages/cube-app-service",
     "packages/cube-app-demo",
     "packages/cube-app-mock"
-  ],
-  "dependencies": {}
+  ]
 }

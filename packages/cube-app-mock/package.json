@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "description": "Mock UI for the Variocube Cube-App SDK",
   "main": "dist/index.js",
-  "bin": "http-server dist/",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build"
@@ -18,13 +17,6 @@
     "url": "https://github.com/variocube/cube-app-sdk/issues"
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
-  "devDependencies": {
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
-    "@variocube/vcmp": "^2.3.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
-  },
   "files": [
     "dist/**"
   ]
