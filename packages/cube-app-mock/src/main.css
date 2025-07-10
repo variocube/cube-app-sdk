@@ -6,9 +6,8 @@
 
 body {
     margin: 0;
-    min-width: 320px;
-    min-height: 100vh;
-    background-color: #111;
+    background-color: #fff;
+	color: #222;
     width: 100%;
     height: 100%;
 }
@@ -23,11 +22,32 @@ body {
 
 .border {
     border-radius: 4px;
-    border-top: 2px groove #aaa;
-    border-left: 2px groove #aaa;
-    border-right: 2px groove #111;
-    border-bottom: 2px groove #111;
+    border-top: 2px ridge #aaa;
+    border-left: 2px ridge #aaa;
+    border-right: 2px ridge #111;
+    border-bottom: 2px ridge #111;
+
 }
+
+.coating {
+	position: relative;
+	background-color: #666;
+}
+
+.coating:before {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 0;
+	background: #666 url("data:image/svg+xml,%3Csvg viewBox='0 0 700 700' width='100%25' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.833' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E") repeat center center;
+	filter: grayscale(100%);
+	mix-blend-mode: multiply;
+	opacity: 0.5;
+}
+
 
 .cube {
     position: relative;
@@ -40,10 +60,29 @@ body {
 }
 
 .banner {
-    background-color: #444;
     text-align: center;
     padding: 8px;
 }
+
+.scanner {
+	padding: 16px;
+	text-align: center;
+}
+
+label {
+	display: block;
+	margin-bottom: 8px;
+}
+
+input, button {
+	font-size: 20px;
+	border: 1px solid #ccc;
+	background: transparent;
+	color: #fff;
+	border-radius: 4px;
+	padding: 8px;
+}
+
 
 .boxes {
     display: flex;
@@ -55,7 +94,6 @@ body {
 }
 
 .box {
-    background-color: #222;
     width: 20vw;
     height: 15vh;
     min-width: 16%;
@@ -63,6 +101,7 @@ body {
     box-sizing: border-box;
     transform-style: preserve-3d;
     z-index: 0;
+	background-color: #222;
 }
 
 .box.open {
@@ -70,7 +109,6 @@ body {
 }
 
 .door {
-    background-color: #444;
     width: 100%;
     height: 100%;
     padding: 6px;
@@ -109,3 +147,25 @@ body {
     from {opacity: 0.5;}
     to {opacity: 1;}
 }
+
+@media (prefers-color-scheme: dark) {
+	body {
+		background-color: #111;
+		color: #ccc;
+	}
+
+	.cube {
+		background-color: #333;
+	}
+	.box {
+		background-color: #222;
+	}
+	.coating {
+		background-color: #333;
+	}
+	.coating:before {
+		background-color: #333;
+		mix-blend-mode: overlay;
+	}
+}
+

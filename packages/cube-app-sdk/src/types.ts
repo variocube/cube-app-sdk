@@ -113,6 +113,16 @@ export interface Cube {
     addEventListener(eventName: "lock", listener: EventListener<LockEvent>): void;
     addEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
 
+	/**
+	 * Removes an event listener.
+	 * @param eventName The event name
+	 * @param listener The event listener
+	 */
+	removeEventListener(eventName: "open", listener: EventListener<OpenEvent>): void;
+	removeEventListener(eventName: "close", listener: EventListener<CloseEvent>): void;
+	removeEventListener(eventName: "lock", listener: EventListener<LockEvent>): void;
+	removeEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
+
     /**
      * Open the locks with the specified id.
      * @param lockId The lock id

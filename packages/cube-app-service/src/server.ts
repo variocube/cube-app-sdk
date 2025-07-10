@@ -3,6 +3,7 @@ import {CodeMessage, CompartmentsMessage, LockMessage, OpenLockMessage, RestartM
 import {createServer} from 'http';
 import {WebSocketServer} from "ws";
 import {serveMockUi} from "./serveMockUi";
+import {Logger} from "@variocube/driver-common";
 
 export class Server {
 
@@ -27,7 +28,8 @@ export class Server {
         this.appServer = new VcmpServer({
             port: 5000,
             heartbeatInterval: 10000,
-            webSocketServer: appWebSocketServer
+            webSocketServer: appWebSocketServer,
+			debug: new Logger("vcmp")
         });
         this.appServer.onSessionConnected = () => {
             console.log(`App connected.`);
@@ -53,6 +55,7 @@ export class Server {
             this.mockServer.broadcast(message);
         });
         this.appServer.on<RestartMessage>("restart", message => {
+			console.log(`Restart`, message);
             this.mockServer.broadcast(message);
         });
 
@@ -85,7 +88,6 @@ export class Server {
 
     private closeWebserver() {
         return new Promise<void>((resolve, reject) => {
-
             this.webServer.close(err => {
                 if (err) {
                     reject(err);

@@ -1,6 +1,6 @@
 import {CloseEvent, CodeEvent, Compartment, Cube, EventListener, LockEvent, OpenEvent} from "./types";
 import {VcmpClient} from "@variocube/vcmp";
-import {CompartmentsMessage, LockMessage} from "./messages";
+import {CodeMessage, CompartmentsMessage, LockMessage} from "./messages";
 
 type EventMap = {
     "code": CodeEvent,
@@ -40,7 +40,12 @@ export class CubeImpl implements Cube {
             this.compartments = compartments;
         });
         this.client.on<LockMessage>("lock", e => this.dispatchEvent("lock", e));
+		this.client.on<CodeMessage>("code", e => this.dispatchEvent("code", e));
     }
+
+	public close() {
+		this.client.stop();
+	}
 
     private dispatchEvent<E extends keyof EventListenerTypeMap>(eventName: E, event: EventMap[E]) {
         for (const listener of this.listeners[eventName]) {
@@ -56,6 +61,10 @@ export class CubeImpl implements Cube {
     addEventListener<E extends keyof EventListenerTypeMap>(eventName: E, listener: EventListenerTypeMap[E]) {
         this.listeners[eventName].push(listener);
     }
+
+	removeEventListener<E extends keyof EventListenerTypeMap>(eventName: E, listener: EventListenerTypeMap[E]) {
+		this.listeners[eventName] = this.listeners[eventName].filter(l => l !== listener) as EventListenerRegistryMap[E];
+	}
 
     async restart() {
         await this.client.send({
