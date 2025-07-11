@@ -2,13 +2,6 @@
 
 SDK for apps running on Variocube lockers.
 
-> [!WARNING]
-> This SDK is currently is DRAFT status. The interfaces defined in this repository are subject to change at any time.
-
-> [!WARNING]
-> Currently, there is no implementation of the SDK. Please contact Variocube, if you are interested in an integration
-> based on this SDK.
-
 ## What is a cube app?
 
 A cube app is a web application that runs in a browser on a Variocube locker and uses its features.
@@ -16,16 +9,20 @@ A cube app is a web application that runs in a browser on a Variocube locker and
 The web application must be hosted on a public URL (like https://yourapp.com/variocube).
 
 It may use Web APIs to provide offline functionality. Specifically, the following APIs are supported on Variocubes:
- - [Service Worker API](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
- - [Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API)
+
+- [Service Worker API](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
+- [Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API)
+
+It can access the hardware features of the locker it runs on, like opening locks or receiving codes
+from a QR-code reader.
+
+Check out our [⭐⭐⭐ Demo App ⭐⭐⭐](https://variocube.github.io/cube-app-sdk/) for a quick overview of
+what is possible.
 
 ## How does it work?
 
-When loading your web application on a Variocube locker, certain query parameters are appended to the URL
-that lets the SDK know where exactly to connect to.
-
-The communication with the locker is facilitated through REST (data) and Websockets (events). This SDK completely
-encapsulates the communication and provides a simple JS/TS interface.
+When running on a Variocube, your web application will be able to communicate with a local service,
+the `cube-app-service`, which provides access to the hardware features on the locker.
 
 ## Limitations
 
@@ -33,13 +30,13 @@ When using this SDK and the underlying services, the following limitations apply
 
 ### Single app only
 
-Only a single app is supported. It is not possible to run multiple apps on the Variocube locker,
+Only a single app is supported. It is not possible to run multiple apps on the Variocube locker
 or use existing Variocube apps alongside your app.
 
 ### Variocube features
 
 Variocube features like maintenance of compartments, location code, maintenance codes, or settings menu are not supported.
-The cube app must provide such features by itself. 
+The cube app must provide such features by itself.
 
 ## Using the SDK
 
@@ -57,20 +54,59 @@ npx @variocube/cube-app-service
 
 The virtual cube will be available at [https://localhost:5000/](https://localhost:5000/).
 
+You might want to take a look at the [source code of the demo app](packages/cube-app-demo) that is included in this repository.
+
 ### Connecting to the Variocube locker
 
 A single call to the `connect` function provides access to all platform features:
 
-https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/open-lock.ts#L1-L4
+```typescript
+import {connect} from "@variocube/cube-app-sdk";
+
+// Connect to the cube
+const cube = connect();
+```
 
 ### Opening a compartment
 
-https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/open-lock.ts#L6-L12
+```typescript
+await cube.openCompartment("1");
+```
 
-### Retrieving a code event
+### Receiving code events
 
-https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/code.ts#L6-L14
+```typescript
+// Add a listener for code events
+cube.addEventListener("code", async ({code}) => {
+	// Open box 1 on the correct code
+	if (code == "12345") {
+		await cube.openCompartment("1");
+	}
+});
+```
+
+### Receiving lock events
+
+```typescript
+// Add a listener for code events
+cube.addEventListener("lock", async ({compartmentNumber, status}) => {
+	console.log(`Compartment ${compartmentNumber} is not ${status}`);
+});
+```
 
 ### Retrieving compartments
 
-https://github.com/variocube/cube-app-sdk/blob/9afca9b22e2682862cc137065f6751ee2a9f435e/examples/compartments.ts#L6-L10
+```typescript
+// Retrieve compartments of the cube
+const compartments = cube.getCompartments();
+for (const compartment of compartments) {
+	await cube.openCompartment(compartment.number);
+}
+```
+
+### Restarting the cube
+
+```typescript
+// Restart the cube
+await cube.restart();
+```
