@@ -7,7 +7,8 @@ import {
 	Card,
 	CardHeader,
 	CircularProgress,
-	Container, GlobalStyles,
+	Container,
+	GlobalStyles,
 	Grid,
 	List,
 	ListItem,
@@ -16,7 +17,7 @@ import {
 	Stack,
 	Typography,
 } from "@mui/material";
-import {CodeEvent, connect, EventListener, LockEvent, OpenEvent} from "@variocube/cube-app-sdk";
+import {CloseEvent, CodeEvent, connect, EventListener, LockEvent, OpenEvent} from "@variocube/cube-app-sdk";
 import React, {Fragment, StrictMode, useEffect, useMemo, useState} from "react";
 import {createRoot} from "react-dom/client";
 
@@ -38,7 +39,7 @@ function App() {
 		close: () => setConnected(false),
 		lock: lockEvent => setLockEvents(events => [{timestamp: Date.now(), ...lockEvent}, ...events].slice(0, 10)),
 		code: codeEvent => setCodeEvents(events => [{timestamp: Date.now(), ...codeEvent}, ...events].slice(0, 10)),
-	})
+	});
 
 	async function openFirstCompartment() {
 		await cube.openCompartment("1");
@@ -52,11 +53,13 @@ function App() {
 
 	return (
 		<Container maxWidth="lg" sx={{my: 4}}>
-			<GlobalStyles styles={{
-				body: {
-					backgroundColor: "#f6f6f6",
-				}
-			}}/>
+			<GlobalStyles
+				styles={{
+					body: {
+						backgroundColor: "#f6f6f6",
+					},
+				}}
+			/>
 			<Stack spacing={4}>
 				<Box>
 					<Typography variant="overline">Variocube Cube App SDK</Typography>
@@ -70,10 +73,10 @@ function App() {
 					{!connected && (
 						<Fragment>
 							<Typography variant="body1" gutterBottom>
-								This demo app requires a connection to the cube app service. The cube app service typically
-								runs on an actual locker and is used by the SDK to enable communication with the locker.
-								Since you are likely running this demo app on your local machine, you need to start
-								the cube app service in order to use its mock implementation of the locker.
+								This demo app requires a connection to the cube app service. The cube app service
+								typically runs on an actual locker and is used by the SDK to enable communication with
+								the locker. Since you are likely running this demo app on your local machine, you need
+								to start the cube app service in order to use its mock implementation of the locker.
 							</Typography>
 							<Typography variant="body1">
 								Please start the cube app service locally with:
@@ -88,17 +91,25 @@ function App() {
 				</Alert>
 				<Typography variant="h2">Mock Cube</Typography>
 				<Typography variant="body1">
-					This is a mock cube that is used to test the cube app SDK. It will visually display the status
-					of compartments and you simulate the opening and closing of compartments. Also, you can simulate
-					the scanning of codes.
+					This is a mock cube that is used to test the cube app SDK. It will visually display the status of
+					compartments and you simulate the opening and closing of compartments. Also, you can simulate the
+					scanning of codes.
 				</Typography>
 				<Card sx={{height: 600, display: "flex", flexFlow: "column", justifyContent: "center"}}>
 					{connected
-						? <iframe title="Mock Cube" src="http://localhost:5000/" width="100%" height="100%" style={{border: 0}} />
+						? (
+							<iframe
+								title="Mock Cube"
+								src="http://localhost:5000/"
+								width="100%"
+								height="100%"
+								style={{border: 0}}
+							/>
+						)
 						: (
-								<Typography variant="body1" color="textSecondary" align="center">
-									The mock cube will be available once the cube app service is started.
-								</Typography>
+							<Typography variant="body1" color="textSecondary" align="center">
+								The mock cube will be available once the cube app service is started.
+							</Typography>
 						)}
 				</Card>
 
@@ -127,14 +138,20 @@ function App() {
 					<Grid container spacing={2}>
 						<Grid size={6}>
 							<Card>
-								<CardHeader title={"Lock Events"} subheader="The last 10 lock events that were received from the cube." />
+								<CardHeader
+									title={"Lock Events"}
+									subheader="The last 10 lock events that were received from the cube."
+								/>
 								<List>
 									{lockEvents.map(event => (
 										<ListItem>
 											<ListItemIcon>
 												<Avatar>{event.compartmentNumber}</Avatar>
 											</ListItemIcon>
-											<ListItemText primary={event.status} secondary={new Date(event.timestamp).toLocaleString()} />
+											<ListItemText
+												primary={event.status}
+												secondary={new Date(event.timestamp).toLocaleString()}
+											/>
 										</ListItem>
 									))}
 								</List>
@@ -142,14 +159,20 @@ function App() {
 						</Grid>
 						<Grid size={6}>
 							<Card>
-								<CardHeader title={"Code Events"} subheader="The last 10 code events that were received from the cube." />
+								<CardHeader
+									title={"Code Events"}
+									subheader="The last 10 code events that were received from the cube."
+								/>
 								<List>
 									{codeEvents.map(event => (
 										<ListItem>
 											<ListItemIcon>
 												<Avatar>🔑</Avatar>
 											</ListItemIcon>
-											<ListItemText primary={event.code} secondary={new Date(event.timestamp).toLocaleString()} />
+											<ListItemText
+												primary={event.code}
+												secondary={new Date(event.timestamp).toLocaleString()}
+											/>
 										</ListItem>
 									))}
 								</List>
@@ -199,7 +222,7 @@ function useCube(options: UseCubeOptions) {
 			if (code) {
 				cube.removeEventListener("code", code);
 			}
-		}
+		};
 	}, [cube, open, close, lock, code]);
 
 	return cube;
