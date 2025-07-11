@@ -1,6 +1,6 @@
 {
   "name": "@variocube/cube-app-service",
-  "version": "1.0.0-alpha.0",
+  "version": "1.0.0-alpha.1",
   "description": "Gateway service that connects the cube-app-sdk to Variocube locker services.",
   "main": "dist/index.js",
   "type": "module",
