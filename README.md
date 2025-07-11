@@ -39,11 +39,23 @@ or use existing Variocube apps alongside your app.
 ### Variocube features
 
 Variocube features like maintenance of compartments, location code, maintenance codes, or settings menu are not supported.
-Such features must be provided by the cube app. 
+The cube app must provide such features by itself. 
 
 ## Using the SDK
 
 Add the package `@variocube/cube-app-sdk` to your web application and use it to interface with the Variocube locker.
+
+```shell
+npm install @variocube/cube-app-sdk
+```
+
+During development, you will need to use the virtual cube provided by the SDK. You can start it with:
+
+```shell
+npx @variocube/cube-app-service
+```
+
+The virtual cube will be available at [https://localhost:5000/](https://localhost:5000/).
 
 ### Connecting to the Variocube locker
 

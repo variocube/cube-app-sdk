@@ -1,11 +1,13 @@
 {
-  "name": "@variocube/cube-app-sdk",
-  "version": "0.0.1",
+  "name": "@variocube/cube-app-sdk-monorepo",
+  "version": "0.0.0",
   "description": "SDK for developing apps running on Variocube lockers",
   "main": "esm/index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "lerna run build",
+    "dev": "lerna run dev",
+    "test": "lerna run test"
   },
   "repository": {
     "type": "git",
@@ -17,8 +19,30 @@
     "url": "https://github.com/variocube/cube-app-sdk/issues"
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
-  "dependencies": {
-    "@variocube/driver-common": "^2.1.1",
-    "typescript": "^5.7.3"
-  }
+  "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@liuli-util/vite-plugin-node": "^0.10.0",
+    "@mui/material": "^7.2.0",
+    "@types/node": "20.14.8",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@types/ws": "^8.18.1",
+    "@types/yargs": "^17.0.33",
+    "@variocube/vcmp": "^2.3.0",
+    "@vitejs/plugin-react": "^4.6.0",
+    "dprint": "^0.50.1",
+    "lerna": "^8.2.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.3.5",
+    "vite-node": "^3.2.4"
+  },
+  "workspaces": [
+    "packages/cube-app-sdk",
+    "packages/cube-app-service",
+    "packages/cube-app-demo",
+    "packages/cube-app-mock"
+  ]
 }

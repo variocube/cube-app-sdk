@@ -1,0 +1,31 @@
+{
+  "name": "@variocube/cube-app-sdk",
+  "version": "0.0.0",
+  "description": "SDK for developing apps that run on Variocube lockers.",
+  "main": "esm/index.js",
+  "type": "module",
+  "types": "esm/index.d.ts",
+  "scripts": {
+    "dev": "tsc -w",
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/variocube/cube-app-sdk.git"
+  },
+  "author": "Variocube GmbH",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/variocube/cube-app-sdk/issues"
+  },
+  "homepage": "https://github.com/variocube/cube-app-sdk#readme",
+  "dependencies": {
+    "@variocube/vcmp": "^2.3.0"
+  },
+  "files": [
+    "esm/**"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

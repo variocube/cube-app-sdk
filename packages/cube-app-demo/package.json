@@ -1,0 +1,24 @@
+{
+  "name": "@variocube/cube-app-demo",
+  "version": "0.0.0",
+  "description": "Demo application showcasing the Cube App SDK",
+  "main": "esm/index.js",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/variocube/cube-app-sdk.git"
+  },
+  "author": "Variocube GmbH",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/variocube/cube-app-sdk/issues"
+  },
+  "homepage": "https://github.com/variocube/cube-app-sdk#readme",
+  "devDependencies": {
+    "@variocube/cube-app-sdk": "*"
+  }
+}

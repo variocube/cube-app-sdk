@@ -1,0 +1,27 @@
+{
+  "name": "@variocube/cube-app-mock",
+  "version": "0.0.0",
+  "description": "Mock UI for the Variocube Cube-App SDK",
+  "main": "dist/index.js",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/variocube/cube-app-sdk.git"
+  },
+  "author": "Variocube GmbH",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/variocube/cube-app-sdk/issues"
+  },
+  "homepage": "https://github.com/variocube/cube-app-sdk#readme",
+  "devDependencies": {
+    "@variocube/cube-app-sdk": "*"
+  },
+  "files": [
+    "dist/**"
+  ]
+}

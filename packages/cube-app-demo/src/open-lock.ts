@@ -1,4 +1,4 @@
-import {connect} from "../src";
+import {connect} from "@variocube/cube-app-sdk";
 
 // Connect to the cube
 const cube = connect();

@@ -37,10 +37,17 @@ export interface CodeEvent {
 }
 
 /**
+ * An event that is dispatched when the connection to the Variocube locker is opened.
+ */
+export interface OpenEvent {
+}
+
+/**
  * An event that is dispatched when the connection to the Variocube locker was closed.
  */
 export interface CloseEvent {
 }
+
 
 /**
  * Describes a lock.
@@ -101,9 +108,20 @@ export interface Cube {
      * @param eventName The event name
      * @param listener The event listener
      */
+    addEventListener(eventName: "open", listener: EventListener<OpenEvent>): void;
+    addEventListener(eventName: "close", listener: EventListener<CloseEvent>): void;
     addEventListener(eventName: "lock", listener: EventListener<LockEvent>): void;
     addEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
-    addEventListener(eventName: "close", listener: EventListener<CloseEvent>): void;
+
+	/**
+	 * Removes an event listener.
+	 * @param eventName The event name
+	 * @param listener The event listener
+	 */
+	removeEventListener(eventName: "open", listener: EventListener<OpenEvent>): void;
+	removeEventListener(eventName: "close", listener: EventListener<CloseEvent>): void;
+	removeEventListener(eventName: "lock", listener: EventListener<LockEvent>): void;
+	removeEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
 
     /**
      * Open the locks with the specified id.
@@ -120,10 +138,10 @@ export interface Cube {
     openCompartment(compartmentNumber: string): Promise<void>;
 
     /**
-     * Retrieves the compartments of the cube.
-     * @return A promise that resolves to the compartments of the cube.
+     * Returns the compartments of the cube.
+     * @return The compartments of the cube.
      */
-    getCompartments(): Promise<Compartment[]>;
+    getCompartments(): Compartment[];
 
     /**
      * Restarts the cube.
@@ -131,9 +149,3 @@ export interface Cube {
      */
     restart(): Promise<void>;
 }
-
-/**
- * Connects to the Variocube locker.
- * @return The `cube` which can be used to interface with the Variocube locker.
- */
-export declare function connect(): Cube;
