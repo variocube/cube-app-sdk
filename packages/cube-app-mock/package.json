@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "description": "Mock UI for the Variocube Cube-App SDK",
   "main": "dist/index.js",
+  "private": true,
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build"
