@@ -16,5 +16,8 @@
   "bugs": {
     "url": "https://github.com/variocube/cube-app-sdk/issues"
   },
-  "homepage": "https://github.com/variocube/cube-app-sdk#readme"
+  "homepage": "https://github.com/variocube/cube-app-sdk#readme",
+  "devDependencies": {
+    "@variocube/cube-app-sdk": "*"
+  }
 }
