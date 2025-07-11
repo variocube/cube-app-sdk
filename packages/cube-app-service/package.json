@@ -1,6 +1,6 @@
 {
   "name": "@variocube/cube-app-service",
-  "version": "0.0.0",
+  "version": "1.0.0-alpha.0",
   "description": "Gateway service that connects the cube-app-sdk to Variocube locker services.",
   "main": "dist/index.js",
   "type": "module",
@@ -21,9 +21,9 @@
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "devDependencies": {
-    "@variocube/vcmp-server": "^2.3.0",
+    "@variocube/cube-app-mock": "^1.0.0-alpha.0",
     "@variocube/driver-common": "^2.2.0",
-    "@variocube/cube-app-mock": "0.0.0",
+    "@variocube/vcmp-server": "^2.3.0",
     "dotenv": "^16.5.0",
     "yargs": "^17.7.2"
   },
