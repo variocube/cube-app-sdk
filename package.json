@@ -1,5 +1,5 @@
 {
-  "name": "@variocube/cube-app-sdk",
+  "name": "@variocube/cube-app-sdk-monorepo",
   "version": "0.0.0",
   "description": "SDK for developing apps running on Variocube lockers",
   "main": "esm/index.js",
