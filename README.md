@@ -1,6 +1,6 @@
 # cube-app-sdk
 
-SDK for apps running on Variocube lockers.
+SDK for developing apps that run on Variocube lockers.
 
 ## What is a cube app?
 

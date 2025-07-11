@@ -7,8 +7,7 @@
   "bin": "dist/index.js",
   "scripts": {
     "build": "vite build && chmod +x dist/index.js",
-    "dev": "vite-node -w src/index.ts",
-    "start": "vite-node src/index.ts"
+    "dev": "vite-node -w src/index.ts -- -vvv"
   },
   "repository": {
     "type": "git",
@@ -23,7 +22,7 @@
   "devDependencies": {
     "@variocube/cube-app-mock": "^1.0.0-alpha.2",
     "@variocube/driver-common": "^2.2.0",
-    "@variocube/vcmp-server": "^2.3.0",
+    "@variocube/vcmp-server": "^2.3.1",
     "dotenv": "^16.5.0",
     "yargs": "^17.7.2"
   },
