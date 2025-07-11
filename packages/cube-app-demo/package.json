@@ -1,6 +1,6 @@
 {
   "name": "@variocube/cube-app-demo",
-  "version": "1.0.0-alpha.3",
+  "version": "1.0.0-alpha.4",
   "description": "Demo application showcasing the Cube App SDK",
   "main": "esm/index.js",
   "private": true,
