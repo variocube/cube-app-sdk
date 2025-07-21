@@ -6,6 +6,7 @@ import {
 	Button,
 	Card,
 	CardHeader,
+	Chip,
 	CircularProgress,
 	Container,
 	FormControlLabel,
@@ -16,34 +17,46 @@ import {
 	ListItem,
 	ListItemIcon,
 	ListItemText,
+	Paper,
 	Stack,
 	Switch,
+	Table,
+	TableBody,
+	TableCell,
+	TableContainer,
+	TableHead,
+	TableRow,
 	Typography,
 } from "@mui/material";
-import {CloseEvent, CodeEvent, connect, EventListener, LockEvent, OpenEvent} from "@variocube/cube-app-sdk";
-import React, {Fragment, StrictMode, useEffect, useMemo, useState} from "react";
+import {
+	CubeProvider,
+	useCodeEvent,
+	useCompartments,
+	useConnected,
+	useCube,
+	useDevices,
+	useLockEvent,
+	useLocks,
+} from "@variocube/cube-app-react-sdk";
+import {CodeEvent, LockEvent} from "@variocube/cube-app-sdk";
+import React, {Fragment, StrictMode, useState} from "react";
 import {createRoot} from "react-dom/client";
 
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
-		<App />
+		<CubeProvider>
+			<App />
+		</CubeProvider>
 	</StrictMode>,
 );
 
 type Timestamped<T> = T & { timestamp: number };
 
 function App() {
-	const [connected, setConnected] = useState(false);
-	const [lockEvents, setLockEvents] = useState<Timestamped<LockEvent>[]>([]);
-	const [codeEvents, setCodeEvents] = useState<Timestamped<CodeEvent>[]>([]);
 	const [mock, setMock] = useState(true);
 
-	const cube = useCube({
-		open: () => setConnected(true),
-		close: () => setConnected(false),
-		lock: lockEvent => setLockEvents(events => [{timestamp: Date.now(), ...lockEvent}, ...events].slice(0, 10)),
-		code: codeEvent => setCodeEvents(events => [{timestamp: Date.now(), ...codeEvent}, ...events].slice(0, 10)),
-	});
+	const cube = useCube();
+	const connected = useConnected();
 
 	async function openFirstCompartment() {
 		await cube.openCompartment("1");
@@ -146,6 +159,18 @@ function App() {
 					</Button>
 				</Stack>
 
+				<Typography variant="h2">Compartments</Typography>
+				<Typography variant="body1">
+					These are the compartments of the cube.
+				</Typography>
+				<CompartmentListCard />
+
+				<Typography variant="h2">Devices</Typography>
+				<Typography variant="body1">
+					This is a list of devices that are currently connected to the cube.
+				</Typography>
+				<DeviceListCard />
+
 				<Typography variant="h2">Events</Typography>
 				<Typography variant="body1">
 					Here is a collection of events that are received from the cube.
@@ -153,46 +178,10 @@ function App() {
 				<Box>
 					<Grid container spacing={2}>
 						<Grid size={6}>
-							<Card>
-								<CardHeader
-									title={"Lock Events"}
-									subheader="The last 10 lock events that were received from the cube."
-								/>
-								<List>
-									{lockEvents.map(event => (
-										<ListItem>
-											<ListItemIcon>
-												<Avatar>{event.compartmentNumber}</Avatar>
-											</ListItemIcon>
-											<ListItemText
-												primary={event.status}
-												secondary={new Date(event.timestamp).toLocaleString()}
-											/>
-										</ListItem>
-									))}
-								</List>
-							</Card>
+							<LockEventCard />
 						</Grid>
 						<Grid size={6}>
-							<Card>
-								<CardHeader
-									title={"Code Events"}
-									subheader="The last 10 code events that were received from the cube."
-								/>
-								<List>
-									{codeEvents.map(event => (
-										<ListItem>
-											<ListItemIcon>
-												<Avatar>🔑</Avatar>
-											</ListItemIcon>
-											<ListItemText
-												primary={event.code}
-												secondary={new Date(event.timestamp).toLocaleString()}
-											/>
-										</ListItem>
-									))}
-								</List>
-							</Card>
+							<CodeEventCard />
 						</Grid>
 					</Grid>
 				</Box>
@@ -201,45 +190,136 @@ function App() {
 	);
 }
 
-interface UseCubeOptions {
-	open?: EventListener<OpenEvent>;
-	close?: EventListener<CloseEvent>;
-	lock?: EventListener<LockEvent>;
-	code?: EventListener<CodeEvent>;
+function CompartmentListCard() {
+	const compartments = useCompartments();
+	const locks = useLocks();
+	const cube = useCube();
+
+	return (
+		<Paper>
+			<TableContainer>
+				<Table>
+					<TableHead>
+						<TableRow>
+							<TableCell>Number</TableCell>
+							<TableCell>Types</TableCell>
+							<TableCell>Features</TableCell>
+							<TableCell>Enabled</TableCell>
+							<TableCell>Lock</TableCell>
+							<TableCell>Secondary Lock</TableCell>
+						</TableRow>
+					</TableHead>
+					<TableBody>
+						{compartments.map(compartment => (
+							<TableRow key={compartment.number}>
+								<TableCell>{compartment.number}</TableCell>
+								<TableCell>{compartment.types.join(", ")}</TableCell>
+								<TableCell>{compartment.features.join(", ")}</TableCell>
+								<TableCell>{compartment.enabled ? "Yes" : "No"}</TableCell>
+								<TableCell>
+									{compartment.lock}
+									{compartment.lock && <Chip label={locks[compartment.lock]} />}
+									<Button
+										disabled={!compartment.lock}
+										onClick={() => compartment.lock && cube.openLock(compartment.lock)}
+									>
+										Open
+									</Button>
+								</TableCell>
+								<TableCell>
+									{compartment.secondaryLock}
+									{compartment.secondaryLock && <Chip label={locks[compartment.secondaryLock]} />}
+									<Button
+										disabled={!compartment.secondaryLock}
+										onClick={() =>
+											compartment.secondaryLock && cube.openLock(compartment.secondaryLock)}
+									>
+										Open
+									</Button>
+								</TableCell>
+							</TableRow>
+						))}
+					</TableBody>
+				</Table>
+			</TableContainer>
+		</Paper>
+	);
 }
 
-function useCube(options: UseCubeOptions) {
-	const {open, close, lock, code} = options;
-	const cube = useMemo(() => connect(), []);
+function DeviceListCard() {
+	const devices = useDevices();
 
-	useEffect(() => {
-		if (open) {
-			cube.addEventListener("open", open);
-		}
-		if (close) {
-			cube.addEventListener("close", close);
-		}
-		if (lock) {
-			cube.addEventListener("lock", lock);
-		}
-		if (code) {
-			cube.addEventListener("code", code);
-		}
-		return () => {
-			if (open) {
-				cube.removeEventListener("open", open);
-			}
-			if (close) {
-				cube.removeEventListener("close", close);
-			}
-			if (lock) {
-				cube.removeEventListener("lock", lock);
-			}
-			if (code) {
-				cube.removeEventListener("code", code);
-			}
-		};
-	}, [cube, open, close, lock, code]);
+	return (
+		<Paper>
+			<List>
+				{devices.map(device => (
+					<ListItem>
+						<ListItemIcon>
+							<Avatar>🖥</Avatar>
+						</ListItemIcon>
+						<ListItemText
+							primary={device.model}
+							secondary={device.vendor}
+						/>
+					</ListItem>
+				))}
+			</List>
+		</Paper>
+	);
+}
 
-	return cube;
+function LockEventCard() {
+	const [lockEvents, setLockEvents] = useState<Timestamped<LockEvent>[]>([]);
+
+	useLockEvent(lockEvent => setLockEvents(events => [{timestamp: Date.now(), ...lockEvent}, ...events].slice(0, 10)));
+
+	return (
+		<Card>
+			<CardHeader
+				title={"Lock Events"}
+				subheader="The last 10 lock events that were received from the cube."
+			/>
+			<List>
+				{lockEvents.map(event => (
+					<ListItem>
+						<ListItemIcon>
+							<Avatar>{event.compartmentNumber}</Avatar>
+						</ListItemIcon>
+						<ListItemText
+							primary={event.status}
+							secondary={new Date(event.timestamp).toLocaleString()}
+						/>
+					</ListItem>
+				))}
+			</List>
+		</Card>
+	);
+}
+
+function CodeEventCard() {
+	const [codeEvents, setCodeEvents] = useState<Timestamped<CodeEvent>[]>([]);
+
+	useCodeEvent(codeEvent => setCodeEvents(events => [{timestamp: Date.now(), ...codeEvent}, ...events].slice(0, 10)));
+
+	return (
+		<Card>
+			<CardHeader
+				title={"Code Events"}
+				subheader="The last 10 code events that were received from the cube."
+			/>
+			<List>
+				{codeEvents.map(event => (
+					<ListItem>
+						<ListItemIcon>
+							<Avatar>🔑</Avatar>
+						</ListItemIcon>
+						<ListItemText
+							primary={event.code}
+							secondary={new Date(event.timestamp).toLocaleString()}
+						/>
+					</ListItem>
+				))}
+			</List>
+		</Card>
+	);
 }

@@ -43,6 +43,7 @@
     "packages/cube-app-sdk",
     "packages/cube-app-service",
     "packages/cube-app-demo",
-    "packages/cube-app-mock"
+    "packages/cube-app-mock",
+    "packages/cube-app-react-sdk"
   ]
 }

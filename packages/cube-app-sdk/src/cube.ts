@@ -119,17 +119,19 @@ export class CubeImpl implements Cube {
 	}
 
 	async openCompartment(compartmentNumber: string, context?: OpenContext) {
+		const lock = this.getCompartmentLock(compartmentNumber);
+		if (!lock) {
+			throw new Error(`Compartment ${compartmentNumber} has no lock`);
+		}
+		await this.openLock(lock, context);
+	}
+
+	getCompartmentLock(compartmentNumber: string) {
 		const compartment = this.getCompartment(compartmentNumber);
 		if (!compartment) {
 			throw new Error(`Compartment ${compartmentNumber} not found`);
 		}
-		const lock = this.#secondary ? compartment.secondaryLock : compartment.lock;
-		if (lock) {
-			await this.openLock(lock, context);
-		}
-		else {
-			throw new Error(`Compartment ${compartmentNumber} has no lock`);
-		}
+		return this.#secondary ? compartment.secondaryLock : compartment.lock;
 	}
 
 	getCompartment(compartmentNumber: string) {
@@ -142,5 +144,9 @@ export class CubeImpl implements Cube {
 
 	get devices() {
 		return [...this.#devices];
+	}
+
+	get secondary() {
+		return this.#secondary;
 	}
 }

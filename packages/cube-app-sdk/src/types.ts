@@ -185,8 +185,8 @@ export interface Cube {
 	removeEventListener(eventName: "close", listener: EventListener<CloseEvent>): void;
 	removeEventListener(eventName: "lock", listener: EventListener<LockEvent>): void;
 	removeEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
-	removeEventListener(eventName: "compartments", listener: EventListener<Compartment[]>): void;
-	removeEventListener(eventName: "devices", listener: EventListener<Device[]>): void;
+	removeEventListener(eventName: "compartments", listener: EventListener<CompartmentsEvent>): void;
+	removeEventListener(eventName: "devices", listener: EventListener<DevicesEvent>): void;
 
 	/**
 	 * Open the locks with the specified id.
@@ -212,9 +212,28 @@ export interface Cube {
 	compartments: Compartment[];
 
 	/**
+	 * Returns the compartment with the specified compartment number, or undefined, if the compartment was not found.
+	 * @param compartmentNumber The compartment number
+	 * @return The compartment
+	 */
+	getCompartment(compartmentNumber: string): Compartment | undefined;
+
+	/**
+	 * Returns the lock of the specified compartment.
+	 * @param compartmentNumber The compartment number
+	 * @return The lock assigned to this compartment.
+	 */
+	getCompartmentLock(compartmentNumber: string): string | undefined;
+
+	/**
 	 * The devices of the cube.
 	 */
 	devices: Device[];
+
+	/**
+	 * Whether the app runs on the secondary side of the cube.
+	 */
+	secondary: boolean;
 
 	/**
 	 * Restarts the user interface of the cube.
