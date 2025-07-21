@@ -90,7 +90,7 @@ cube.addEventListener("code", async ({code}) => {
 ```typescript
 // Add a listener for code events
 cube.addEventListener("lock", async ({compartmentNumber, status}) => {
-	console.log(`Compartment ${compartmentNumber} is not ${status}`);
+	console.log(`Compartment ${compartmentNumber} is now ${status}`);
 });
 ```
 
@@ -98,15 +98,27 @@ cube.addEventListener("lock", async ({compartmentNumber, status}) => {
 
 ```typescript
 // Retrieve compartments of the cube
-const compartments = cube.getCompartments();
+const compartments = cube.compartments;
 for (const compartment of compartments) {
 	await cube.openCompartment(compartment.number);
 }
 ```
 
-### Restarting the cube
+### Retrieving devices
 
 ```typescript
-// Restart the cube
-await cube.restart();
+const devices = cube.devices;
+for (const device of devices) {
+	console.log(`Device ${device.id} is a ${device.types.join(", ")}`);
+}
+```
+
+### Restarting
+
+```typescript
+// Restart the operating system
+await cube.restartOperatingSystem();
+
+// Restart the user interface
+await cube.restartUserInterface();
 ```

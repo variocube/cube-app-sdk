@@ -4,6 +4,7 @@ import {getLogLevel, Logger} from "@variocube/driver-common";
 import {config} from "dotenv";
 import yargs from "yargs";
 import {hideBin} from "yargs/helpers";
+import {DEFAULT_CONTROLLER_HOST, DEFAULT_CONTROLLER_PORT, DEFAULT_HOST, DEFAULT_PORT} from "./defaults";
 import {Server} from "./server";
 
 console.log("Variocube Cube App Service");
@@ -20,42 +21,41 @@ const argv = await yargs()
 	.alias("v", "verbose")
 	.middleware(args => Logger.setLogLevel(getLogLevel(args.verbose)))
 	.options({
+		"host": {
+			describe: "The hostname to listen on",
+			type: "string",
+			alias: "H",
+			default: process.env.HOST || DEFAULT_HOST,
+		},
+		"port": {
+			describe: "The port to listen on",
+			type: "number",
+			alias: "p",
+			coerce: (value: string) => parseInt(value, 10),
+			default: process.env.PORT || DEFAULT_PORT,
+		},
 		"controller-host": {
 			describe: "The hostname where the controller is running",
 			type: "string",
-			default: process.env.CONTROLLER_HOST || "localhost",
+			default: process.env.CONTROLLER_HOST || DEFAULT_CONTROLLER_HOST,
 		},
 		"controller-port": {
 			describe: "The port where the controller is listening",
 			type: "number",
-			default: process.env.CONTROLLER_PORT || 9000,
-		},
-		"unit-host": {
-			describe: "The hostname where the unit is running.",
-			type: "string",
-			default: process.env.UNIT_HOST || "localhost",
-		},
-		"unit-port": {
-			describe: "The port where the unit is listening",
-			type: "number",
-			default: process.env.UNIT_PORT || 2000,
-		},
-		"mock": {
-			describe: "Use the mock mode",
-			type: "boolean",
-			alias: "m",
-			default: process.env.MOCK || false,
+			coerce: (value: string) => parseInt(value, 10),
+			default: process.env.CONTROLLER_PORT || DEFAULT_CONTROLLER_PORT,
 		},
 	})
 	.help("h")
 	.alias("h", "help")
 	.parse(hideBin(process.argv));
 
+// Disable native optimizations in the `ws` package, so we
+// don't need to bundle native code for the different platforms.
 process.env.WS_NO_BUFFER_UTIL = "true";
 process.env.WS_NO_UTF_8_VALIDATE = "true";
 
-// const controller = argv.mock ?
-const server = new Server();
+const server = new Server(argv);
 
 async function stop() {
 	try {

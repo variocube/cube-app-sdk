@@ -1,26 +1,35 @@
 import {VcmpMessage} from "@variocube/vcmp";
-import {Compartment, LockEvent} from "./types";
+import {CompartmentsEvent, DevicesEvent, LockEvent} from "./types";
 
 export interface OpenLockMessage extends VcmpMessage {
-  "@type": 'openLock';
-  lockId: string;
+	"@type": "openLock";
+	lock: string;
+	actor?: string;
+	action?: string;
 }
 
 export interface LockMessage extends VcmpMessage, LockEvent {
-  "@type": 'lock';
+	"@type": "lock";
 }
 
-export interface CompartmentsMessage extends VcmpMessage {
-  "@type": 'compartments';
-  compartments: Compartment[];
+export interface CompartmentsMessage extends VcmpMessage, CompartmentsEvent {
+	"@type": "compartments";
 }
 
-export interface RestartMessage extends VcmpMessage {
-  "@type": 'restart';
+export interface DevicesMessage extends VcmpMessage, DevicesEvent {
+	"@type": "devices";
+}
+
+export interface RestartOsMessage extends VcmpMessage {
+	"@type": "restartOs";
+}
+
+export interface RestartUiMessage extends VcmpMessage {
+	"@type": "restartUi";
 }
 
 export interface CodeMessage extends VcmpMessage {
-  "@type": 'code';
-  code: string;
-  source: "KEYPAD" | "SCANNER" | "NFC";
+	"@type": "code";
+	code: string;
+	source: "KEYPAD" | "SCANNER" | "NFC";
 }

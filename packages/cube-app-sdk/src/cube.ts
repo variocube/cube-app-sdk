@@ -1,97 +1,146 @@
-import {CloseEvent, CodeEvent, Compartment, Cube, EventListener, LockEvent, OpenEvent} from "./types";
 import {VcmpClient} from "@variocube/vcmp";
-import {CodeMessage, CompartmentsMessage, LockMessage} from "./messages";
+import {CodeMessage, CompartmentsMessage, DevicesMessage, LockMessage, OpenLockMessage} from "./messages";
+import {
+	CloseEvent,
+	CodeEvent,
+	Compartment,
+	CompartmentsEvent,
+	Cube,
+	Device,
+	DevicesEvent,
+	EventListener,
+	LockEvent,
+	OpenContext,
+	OpenEvent,
+} from "./types";
 
 type EventMap = {
-    "code": CodeEvent,
-    "lock": LockEvent,
-    "open": OpenEvent,
-    "close": CloseEvent,
-}
+	"code": CodeEvent;
+	"lock": LockEvent;
+	"open": OpenEvent;
+	"close": CloseEvent;
+	"compartments": CompartmentsEvent;
+	"devices": DevicesEvent;
+};
 
 type EventListenerTypeMap = {
-    [E in keyof EventMap]: EventListener<EventMap[E]>;
-}
+	[E in keyof EventMap]: EventListener<EventMap[E]>;
+};
 
 type EventListenerRegistryMap = {
-    [E in keyof EventListenerTypeMap]: Array<EventListenerTypeMap[E]>;
+	[E in keyof EventListenerTypeMap]: Array<EventListenerTypeMap[E]>;
+};
+
+export interface CubeImplOptions {
+	host: string;
+	port: number;
+	secondary: boolean;
 }
 
 export class CubeImpl implements Cube {
+	readonly #listeners: EventListenerRegistryMap;
+	readonly #client: VcmpClient;
+	readonly #secondary: boolean;
+	#compartments: Compartment[];
+	#devices: Device[];
 
-    private readonly listeners: EventListenerRegistryMap;
-    private readonly client: VcmpClient;
-    private compartments: Compartment[];
-
-    constructor() {
-        this.listeners = {
-            code: [],
-            lock: [],
-            open: [],
-            close: [],
-        };
-        this.compartments = [];
-        this.client = new VcmpClient("ws://localhost:5000", {
-            autoStart: true,
-        });
-        this.client.onOpen = () => this.dispatchEvent("open", {});
-        this.client.onClose = () => this.dispatchEvent("close", {});
-        this.client.on<CompartmentsMessage>("compartments", ({compartments}) => {
-            this.compartments = compartments;
-        });
-        this.client.on<LockMessage>("lock", e => this.dispatchEvent("lock", e));
-		this.client.on<CodeMessage>("code", e => this.dispatchEvent("code", e));
-    }
-
-	public close() {
-		this.client.stop();
+	constructor(options: CubeImplOptions) {
+		this.#listeners = {
+			code: [],
+			lock: [],
+			open: [],
+			close: [],
+			compartments: [],
+			devices: [],
+		};
+		this.#secondary = options.secondary;
+		this.#compartments = [];
+		this.#devices = [];
+		this.#client = new VcmpClient(`ws://${options.host}:${options.port}`, {
+			autoStart: true,
+		});
+		this.#client.onOpen = () => this.#dispatchEvent("open", {});
+		this.#client.onClose = () => this.#dispatchEvent("close", {});
+		this.#client.on<CompartmentsMessage>("compartments", (e) => {
+			this.#compartments = e.compartments;
+			this.#dispatchEvent("compartments", e);
+		});
+		this.#client.on<DevicesMessage>("devices", (e) => {
+			this.#devices = e.devices;
+			this.#dispatchEvent("devices", e);
+		});
+		this.#client.on<LockMessage>("lock", e => this.#dispatchEvent("lock", e));
+		this.#client.on<CodeMessage>("code", e => this.#dispatchEvent("code", e));
 	}
 
-    private dispatchEvent<E extends keyof EventListenerTypeMap>(eventName: E, event: EventMap[E]) {
-        for (const listener of this.listeners[eventName]) {
-            try {
-                listener(event);
-            }
-            catch (error) {
-                console.error("Error in event listener", error);
-            }
-        }
-    }
+	close() {
+		this.#client.stop();
+	}
 
-    addEventListener<E extends keyof EventListenerTypeMap>(eventName: E, listener: EventListenerTypeMap[E]) {
-        this.listeners[eventName].push(listener);
-    }
+	#dispatchEvent<E extends keyof EventListenerTypeMap>(eventName: E, event: EventMap[E]) {
+		for (const listener of this.#listeners[eventName]) {
+			try {
+				listener(event);
+			}
+			catch (error) {
+				console.error("Error in event listener", error);
+			}
+		}
+	}
+
+	addEventListener<E extends keyof EventListenerTypeMap>(eventName: E, listener: EventListenerTypeMap[E]) {
+		this.#listeners[eventName].push(listener);
+	}
 
 	removeEventListener<E extends keyof EventListenerTypeMap>(eventName: E, listener: EventListenerTypeMap[E]) {
-		this.listeners[eventName] = this.listeners[eventName].filter(l => l !== listener) as EventListenerRegistryMap[E];
+		this.#listeners[eventName] = this.#listeners[eventName].filter(l =>
+			l !== listener
+		) as EventListenerRegistryMap[E];
 	}
 
-    async restart() {
-        await this.client.send({
-            "@type": "restart"
-        });
-    }
+	async restartUserInterface() {
+		await this.#client.send({
+			"@type": "restartUi",
+		});
+	}
 
-    async openLock(lockId: string) {
-        await this.client.send({
-            "@type": "openLock",
-            lockId,
-        });
-    }
+	async restartOperatingSystem() {
+		await this.#client.send({
+			"@type": "restartOs",
+		});
+	}
 
-    async openCompartment(compartmentNumber: string) {
-        const compartment = this.getCompartment(compartmentNumber);
-        if (!compartment) {
-            throw new Error(`Compartment ${compartmentNumber} not found`);
-        }
-        await this.openLock(compartment.lock.id);
-    }
+	async openLock(lock: string, context?: OpenContext) {
+		await this.#client.send<OpenLockMessage>({
+			"@type": "openLock",
+			lock,
+			...context,
+		});
+	}
 
-    getCompartment(compartmentNumber: string) {
-        return this.compartments.find(compartment => compartment.number == compartmentNumber);
-    }
+	async openCompartment(compartmentNumber: string, context?: OpenContext) {
+		const compartment = this.getCompartment(compartmentNumber);
+		if (!compartment) {
+			throw new Error(`Compartment ${compartmentNumber} not found`);
+		}
+		const lock = this.#secondary ? compartment.secondaryLock : compartment.lock;
+		if (lock) {
+			await this.openLock(lock, context);
+		}
+		else {
+			throw new Error(`Compartment ${compartmentNumber} has no lock`);
+		}
+	}
 
-    getCompartments() {
-        return [...this.compartments];
-    }
+	getCompartment(compartmentNumber: string) {
+		return this.#compartments.find(compartment => compartment.number == compartmentNumber);
+	}
+
+	get compartments() {
+		return [...this.#compartments];
+	}
+
+	get devices() {
+		return [...this.#devices];
+	}
 }

@@ -8,6 +8,8 @@ import {
 	CardHeader,
 	CircularProgress,
 	Container,
+	FormControlLabel,
+	FormHelperText,
 	GlobalStyles,
 	Grid,
 	List,
@@ -15,6 +17,7 @@ import {
 	ListItemIcon,
 	ListItemText,
 	Stack,
+	Switch,
 	Typography,
 } from "@mui/material";
 import {CloseEvent, CodeEvent, connect, EventListener, LockEvent, OpenEvent} from "@variocube/cube-app-sdk";
@@ -33,6 +36,7 @@ function App() {
 	const [connected, setConnected] = useState(false);
 	const [lockEvents, setLockEvents] = useState<Timestamped<LockEvent>[]>([]);
 	const [codeEvents, setCodeEvents] = useState<Timestamped<CodeEvent>[]>([]);
+	const [mock, setMock] = useState(true);
 
 	const cube = useCube({
 		open: () => setConnected(true),
@@ -46,7 +50,7 @@ function App() {
 	}
 
 	async function openAllCompartments() {
-		for (const compartment of cube.getCompartments()) {
+		for (const compartment of cube.compartments) {
 			await cube.openCompartment(compartment.number);
 		}
 	}
@@ -96,11 +100,11 @@ function App() {
 					scanning of codes.
 				</Typography>
 				<Card sx={{height: 600, display: "flex", flexFlow: "column", justifyContent: "center"}}>
-					{connected
+					{(mock && connected)
 						? (
 							<iframe
 								title="Mock Cube"
-								src="http://localhost:5000/"
+								src="http://localhost:4000/"
 								width="100%"
 								height="100%"
 								style={{border: 0}}
@@ -112,6 +116,15 @@ function App() {
 							</Typography>
 						)}
 				</Card>
+				<Box>
+					<FormControlLabel
+						label="Use Mock Cube"
+						control={<Switch checked={mock} onChange={() => setMock(!mock)} />}
+					/>
+					<FormHelperText>
+						You can switch off the mock cube, if you want to run the demo app against a Variocube Locker.
+					</FormHelperText>
+				</Box>
 
 				<Typography variant="h2">Actions</Typography>
 				<Typography variant="body1">
@@ -119,8 +132,11 @@ function App() {
 				</Typography>
 
 				<Stack spacing={2} direction="row">
-					<Button variant="outlined" disabled={!connected} onClick={() => cube.restart()}>
-						Restart Cube
+					<Button variant="outlined" disabled={!connected} onClick={() => cube.restartOperatingSystem()}>
+						Restart Operating System
+					</Button>
+					<Button variant="outlined" disabled={!connected} onClick={() => cube.restartUserInterface()}>
+						Restart User Interface
 					</Button>
 					<Button variant="outlined" disabled={!connected} onClick={openFirstCompartment}>
 						Open First Compartment
