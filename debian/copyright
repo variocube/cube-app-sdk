@@ -1,0 +1,6 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: variocube-cube-app-service
+
+Files: *
+Copyright: 2025 Variocube
+License: MIT

@@ -1,0 +1,14 @@
+Source: variocube-cube-app-service
+Section: admin
+Priority: optional
+Maintainer: Variocube <support@variocube.com>
+Build-Depends: debhelper-compat (= 12)
+Standards-Version: 4.4.1
+
+Package: variocube-cube-app-service
+Architecture: all
+Depends: nodejs (>= 18),
+ ${misc:Depends}
+Conflicts: variocube-app-host
+Description: Variocube Cube App Service
+ A service that allows an app running on a Variocube locker to communicate with the locker.

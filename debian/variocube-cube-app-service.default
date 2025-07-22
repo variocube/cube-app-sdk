@@ -1,0 +1,19 @@
+#
+# variocube-cube-app-service configuration
+#
+
+## Controller
+
+# Sets the controller host
+CONTROLLER_HOST=localhost
+
+# Sets the controller port
+CONTROLLER_PORT=9000
+
+## Host and port
+
+# The hostname to listen on
+HOST=localhost
+
+# The port to listen on
+PORT=4000

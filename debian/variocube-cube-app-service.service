@@ -1,0 +1,14 @@
+[Unit]
+Description=Cube App service
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/default/variocube-cube-app-service
+WorkingDirectory=/usr/lib/variocube-cube-app-service
+ExecStart=/usr/bin/variocube-cube-app-service
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+User=variocube-cube-app-service
+
+[Install]
+WantedBy=multi-user.target

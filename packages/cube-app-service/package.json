@@ -2,11 +2,11 @@
   "name": "@variocube/cube-app-service",
   "version": "1.0.0-alpha.4",
   "description": "Gateway service that connects the cube-app-sdk to Variocube locker services.",
-  "main": "dist/index.js",
+  "main": "dist/main.mjs",
   "type": "module",
-  "bin": "dist/index.js",
+  "bin": "dist/main.mjs",
   "scripts": {
-    "build": "vite build && chmod +x dist/index.js",
+    "build": "vite build && chmod +x dist/main.mjs",
     "dev": "vite-node -w src/index.ts -- -vvv"
   },
   "repository": {

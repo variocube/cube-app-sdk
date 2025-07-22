@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+dh_prep:
+	sed -i "1s/.*/variocube-cube-app-service ($$(jq -r ".version" <packages/cube-app-service/package.json | tr "-" "~")) bullseye; urgency=medium/" debian/changelog
+
+override_dh_auto_build:
+	npm run -w packages/cube-app-service build
+
+execute_after_dh_fixperms:
+	chmod 0755 debian/variocube-cube-app-service/usr/lib/variocube-cube-app-service/main.mjs
+
+override_dh_auto_clean:
+	rm -rf packages/cube-app-service/dist/*

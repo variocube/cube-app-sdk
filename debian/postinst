@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -e
+
+# Create user variocube-cube-app-service
+if ! getent passwd variocube-cube-app-service >/dev/null; then
+    adduser --system --home /var/lib/variocube-cube-app-service --group variocube-cube-app-service
+fi
+
+#DEBHELPER#
+
+exit 0
