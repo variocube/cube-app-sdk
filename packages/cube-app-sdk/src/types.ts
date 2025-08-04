@@ -236,6 +236,11 @@ export interface Cube {
 	secondary: boolean;
 
 	/**
+	 * Whether the connection to the cube app service is currently open.
+	 */
+	connected: boolean;
+
+	/**
 	 * Restarts the user interface of the cube.
 	 * @return A promise that resolves when the restart command was successfully issued.
 	 * @throws Error if the restart command could not be passed to the service.

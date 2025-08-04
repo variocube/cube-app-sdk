@@ -149,4 +149,8 @@ export class CubeImpl implements Cube {
 	get secondary() {
 		return this.#secondary;
 	}
+
+	get connected() {
+		return Boolean(this.#client.connected);
+	}
 }

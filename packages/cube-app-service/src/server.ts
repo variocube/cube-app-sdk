@@ -56,6 +56,18 @@ export class Server {
 			log.info("App disconnected.");
 		};
 
+		const sendEmptyCompartmentsAndDevices = () => {
+			log.info("Sending empty compartments and devices to app.");
+			this.#appServer.broadcast<CompartmentsMessage>({
+				"@type": "compartments",
+				compartments: [],
+			});
+			this.#appServer.broadcast<DevicesMessage>({
+				"@type": "devices",
+				devices: [],
+			});
+		};
+
 		this.#mockServer = new VcmpServer({
 			heartbeatInterval: 10000,
 			webSocketServer: mockWebSocketServer,
@@ -66,6 +78,7 @@ export class Server {
 		};
 		this.#mockServer.onSessionDisconnected = () => {
 			log.info("Mock disconnected.");
+			sendEmptyCompartmentsAndDevices();
 		};
 
 		this.#controller = new VcmpClient(`ws://${controllerHost}:${controllerPort}/app`, {
@@ -78,6 +91,7 @@ export class Server {
 		};
 		this.#controller.onClose = () => {
 			log.info("Controller disconnected.");
+			sendEmptyCompartmentsAndDevices();
 		};
 
 		this.#appServer.on<OpenLockMessage>("openLock", async (message) => {

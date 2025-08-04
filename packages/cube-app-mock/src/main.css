@@ -64,9 +64,29 @@ body {
     padding: 8px;
 }
 
+.control-panel {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.lock-options {
+	padding: 16px;
+}
+
+.lock-option {
+	display: flex;
+	align-items: center;
+	margin: 8px 0;
+}
+
+.lock-option label {
+	margin: 0 0 0 8px;
+}
+
 .scanner {
 	padding: 16px;
-	text-align: center;
+	text-align: right;
 }
 
 label {
@@ -121,10 +141,23 @@ input, button {
     text-align: start;
     appearance: none;
     display: flex;
+	position: relative;
 }
 
 .box.open .door {
     transform: rotateY(45deg);
+}
+
+.door .error-status {
+	color: white;
+	background-color: #9a0c0c;
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-weight: bold;
+	border-radius: 2px;
+	padding: 2px 4px;
 }
 
 .restarting {
