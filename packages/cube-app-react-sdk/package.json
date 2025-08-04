@@ -1,6 +1,6 @@
 {
   "name": "@variocube/cube-app-react-sdk",
-  "version": "1.0.0-alpha.6",
+  "version": "1.0.0-beta.0",
   "description": "SDK for developing React apps that run on Variocube lockers",
   "main": "esm/index.js",
   "scripts": {
@@ -18,7 +18,7 @@
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "dependencies": {
-    "@variocube/cube-app-sdk": "^1.0.0-alpha.5"
+    "@variocube/cube-app-sdk": "^1.0.0-beta.0"
   },
   "peerDependencies": {
     "react": "^17.0.0 || ^18.0.0 || ^19.0.0"
