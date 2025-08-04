@@ -28,8 +28,14 @@ the communication with this service and provides a simple API for interacting wi
 
 Add the package `@variocube/cube-app-sdk` to your web application and use it to interface with the Variocube locker.
 
+If you are using React in your app, we advise using the `@variocube/cube-app-react-sdk` instead. It is a simple
+React wrapper (context provider + hooks) around the SDK.
+
 ```shell
 npm install @variocube/cube-app-sdk
+
+# Or, in a React app:
+npm install @variocube/cube-app-react-sdk
 ```
 
 During development, you will need to use the virtual cube provided by the SDK. You can start it with:
@@ -38,7 +44,7 @@ During development, you will need to use the virtual cube provided by the SDK. Y
 npx @variocube/cube-app-service
 ```
 
-The virtual cube will be available at [https://localhost:5000/](https://localhost:5000/).
+The virtual cube will be available at [http://localhost:4000/](http://localhost:4000/).
 
 You might want to take a look at the [source code of the demo app](packages/cube-app-demo) that is included in this repository.
 
@@ -184,7 +190,7 @@ If a lock is opened without a prior open command, it can be marked as `BREAKIN`.
 // Handle the `BLOCKED` status in a lock event handler
 cube.addEventListener("lock", ({lock, status}) => {
 	if (status == "BREAKIN") {
-		console.error(`Break-in attempt at lock ${lock}!`);
+		console.error(`Break-in alert at lock ${lock}!`);
 	}
 });
 ```
