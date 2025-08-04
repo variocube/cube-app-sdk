@@ -3,9 +3,6 @@
 %:
 	dh $@
 
-dh_prep:
-	sed -i "1s/.*/variocube-cube-app-service ($$(jq -r ".version" <packages/cube-app-service/package.json | tr "-" "~")) bullseye; urgency=medium/" debian/changelog
-
 override_dh_auto_build:
 	npm run -w packages/cube-app-service build
 

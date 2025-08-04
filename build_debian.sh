@@ -15,6 +15,9 @@ else
   mkdir -p dpkg
   rm -rf dpkg/*
 
+  # Write the current version to the changelog, transforming version formats (`-` becomes `~`)
+  sed -i "1s/.*/variocube-cube-app-service ($(jq -r ".version" <packages/cube-app-service/package.json | tr "-" "~")) bullseye; urgency=medium/" debian/changelog
+
   # Run build for each arch in separate container
   for arch in $archs
   do
