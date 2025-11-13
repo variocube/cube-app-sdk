@@ -1,6 +1,6 @@
 import {VcmpClient} from "@variocube/vcmp";
-import {CodeMessage, CompartmentsMessage, DevicesMessage, LockMessage, OpenLockMessage} from "./messages";
-import {
+import type {CodeMessage, CompartmentsMessage, DevicesMessage, LockMessage, OpenLockMessage} from "./messages";
+import type {
 	CloseEvent,
 	CodeEvent,
 	Compartment,
