@@ -73,7 +73,7 @@ export class Server {
 		this.#mockServer = new VcmpServer({
 			heartbeatInterval: 10000,
 			webSocketServer: mockWebSocketServer,
-			debug: new Logger("mock-vcmp"),
+			debug: log.isVerboseEnabled() ? new Logger("mock-vcmp") : undefined,
 		});
 		this.#mockServer.onSessionConnected = () => {
 			log.info(`Mock connected.`);
@@ -85,7 +85,7 @@ export class Server {
 
 		this.#controller = new VcmpClient(`ws://${controllerHost}:${controllerPort}/app`, {
 			autoStart: true,
-			debug: new Logger("controller-vcmp"),
+			debug: log.isVerboseEnabled() ? new Logger("controller-vcmp") : undefined,
 			customWebSocket: WebSocket,
 		});
 		this.#controller.onOpen = () => {
@@ -93,9 +93,12 @@ export class Server {
 			this.#controllerWasConnected = true;
 		};
 		this.#controller.onClose = () => {
-			log.info("Controller disconnected.");
 			if (this.#controllerWasConnected) {
+				log.warn("Controller disconnected.");
 				sendEmptyCompartmentsAndDevices();
+			}
+			else {
+				log.verbose("Controller disconnected.");
 			}
 		};
 
