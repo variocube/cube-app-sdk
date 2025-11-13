@@ -13,6 +13,9 @@ import {
 } from "@variocube/cube-app-sdk";
 import React, {createContext, PropsWithChildren, useContext, useEffect, useMemo, useState} from "react";
 
+// Re-export the types from the SDK to make them available to consumers of the React SDK.
+export type * from "@variocube/cube-app-sdk";
+
 export type Locks = Record<string, LockStatus>;
 
 interface CubeContextContent {
