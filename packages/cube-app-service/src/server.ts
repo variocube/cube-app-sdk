@@ -29,6 +29,8 @@ export class Server {
 	readonly #webServer: ReturnType<typeof createServer>;
 	readonly #controller: VcmpClient;
 
+	#controllerWasConnected = false;
+
 	constructor(options?: ServerOptions) {
 		const {host = "localhost", port = 4000, controllerHost = "localhost", controllerPort = 9000} = options ?? {};
 
@@ -88,10 +90,13 @@ export class Server {
 		});
 		this.#controller.onOpen = () => {
 			log.info("Controller connected.");
+			this.#controllerWasConnected = true;
 		};
 		this.#controller.onClose = () => {
 			log.info("Controller disconnected.");
-			sendEmptyCompartmentsAndDevices();
+			if (this.#controllerWasConnected) {
+				sendEmptyCompartmentsAndDevices();
+			}
 		};
 
 		this.#appServer.on<OpenLockMessage>("openLock", async (message) => {
