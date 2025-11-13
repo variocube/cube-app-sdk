@@ -21,7 +21,20 @@ createRoot(document.getElementById("root")!).render(
 	</StrictMode>,
 );
 
-const compartments: Compartment[] = new Array(16).fill(0)
+function getNumberOfCompartments() {
+	const paramValue = new URLSearchParams(window.location.search).get("compartments");
+	if (paramValue) {
+		const compartments = parseInt(paramValue);
+		if (Number.isInteger(compartments) && compartments > 0) {
+			return Math.ceil(compartments / 4) * 4;
+		}
+	}
+	return 16;
+}
+const NUMBER_OF_COMPARTMENTS = getNumberOfCompartments();
+const ROWS = NUMBER_OF_COMPARTMENTS / 4;
+
+const compartments: Compartment[] = new Array(NUMBER_OF_COMPARTMENTS).fill(0)
 	.map((_, index) => index + 1)
 	.map((ordinal) => ({
 		number: ordinal.toString(),
@@ -263,7 +276,7 @@ type CompartmentItemProps = {
 function CompartmentItem(props: Readonly<CompartmentItemProps>) {
 	const {compartment, open, blocked, breakIn, onClick} = props;
 	return (
-		<div className={`box ${open && "open"}`}>
+		<div className={`box ${open && "open"}`} style={{height: `${100 / ROWS}%`}}>
 			<button className={"door border coating"} onClick={() => onClick(compartment)}>
 				<div>{compartment.number}</div>
 				{blocked && <div className="error-status">Blocked</div>}
