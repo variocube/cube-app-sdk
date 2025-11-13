@@ -1,6 +1,6 @@
 {
   "name": "@variocube/cube-app-demo",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.3",
   "description": "Demo application showcasing the Cube App SDK",
   "main": "esm/index.js",
   "private": true,
@@ -19,7 +19,7 @@
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "devDependencies": {
-    "@variocube/cube-app-react-sdk": "^1.0.0-beta.2",
-    "@variocube/cube-app-sdk": "^1.0.0-beta.2"
+    "@variocube/cube-app-react-sdk": "^1.0.0-beta.3",
+    "@variocube/cube-app-sdk": "^1.0.0-beta.3"
   }
 }
