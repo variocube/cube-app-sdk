@@ -1,4 +1,4 @@
 
-export * from "./connect";
-export * from "./types";
-export * from "./messages";
+export * from "./connect.js";
+export type * from "./types";
+export type * from "./messages";
