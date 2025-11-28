@@ -32,7 +32,7 @@
     "@variocube/vcmp": "^2.3.0",
     "@vitejs/plugin-react": "^4.6.0",
     "dprint": "^0.50.1",
-    "lerna": "^8.2.2",
+    "lerna": "^9.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "typescript": "^5.7.3",
