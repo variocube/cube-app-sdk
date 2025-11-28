@@ -31,6 +31,9 @@ export class Server {
 
 	#controllerWasConnected = false;
 
+	#compartments: CompartmentsMessage = EMPTY_COMPARTMENTS_MESSAGE;
+	#devices: DevicesMessage = EMTPY_DEVICES_MESSAGE;
+
 	constructor(options?: ServerOptions) {
 		const {host = "localhost", port = 4000, controllerHost = "localhost", controllerPort = 9000} = options ?? {};
 
@@ -51,23 +54,22 @@ export class Server {
 			webSocketServer: appWebSocketServer,
 			debug: new Logger("app-vcmp"),
 		});
-		this.#appServer.onSessionConnected = () => {
+		this.#appServer.onSessionConnected = (session) => {
 			log.info(`App connected.`);
+			session.send<CompartmentsMessage>(this.#compartments);
+			session.send<DevicesMessage>(this.#devices);
 		};
 		this.#appServer.onSessionDisconnected = () => {
 			log.info("App disconnected.");
 		};
 
-		const sendEmptyCompartmentsAndDevices = () => {
+		const resetCompartmentsAndDevices = () => {
 			log.info("Sending empty compartments and devices to app.");
-			this.#appServer.broadcast<CompartmentsMessage>({
-				"@type": "compartments",
-				compartments: [],
-			});
-			this.#appServer.broadcast<DevicesMessage>({
-				"@type": "devices",
-				devices: [],
-			});
+			this.#compartments = EMPTY_COMPARTMENTS_MESSAGE;
+			this.#appServer.broadcast<CompartmentsMessage>(this.#compartments);
+
+			this.#devices = EMTPY_DEVICES_MESSAGE;
+			this.#appServer.broadcast<DevicesMessage>(this.#devices);
 		};
 
 		this.#mockServer = new VcmpServer({
@@ -80,7 +82,7 @@ export class Server {
 		};
 		this.#mockServer.onSessionDisconnected = () => {
 			log.info("Mock disconnected.");
-			sendEmptyCompartmentsAndDevices();
+			resetCompartmentsAndDevices();
 		};
 
 		this.#controller = new VcmpClient(`ws://${controllerHost}:${controllerPort}/app`, {
@@ -95,7 +97,7 @@ export class Server {
 		this.#controller.onClose = () => {
 			if (this.#controllerWasConnected) {
 				log.warn("Controller disconnected.");
-				sendEmptyCompartmentsAndDevices();
+				resetCompartmentsAndDevices();
 			}
 			else {
 				log.verbose("Controller disconnected.");
@@ -117,6 +119,7 @@ export class Server {
 
 		const handleCompartments = (message: CompartmentsMessage) => {
 			log.info(`Compartments`, message);
+			this.#compartments = message;
 			this.#appServer.broadcast(message);
 		};
 		this.#mockServer.on<CompartmentsMessage>("compartments", handleCompartments);
@@ -124,6 +127,7 @@ export class Server {
 
 		const handleDevices = (message: DevicesMessage) => {
 			log.info("Devices", message);
+			this.#devices = message;
 			this.#appServer.broadcast(message);
 		};
 		this.#mockServer.on<DevicesMessage>("devices", handleDevices);
@@ -193,3 +197,13 @@ export class Server {
 		});
 	}
 }
+
+const EMPTY_COMPARTMENTS_MESSAGE: CompartmentsMessage = {
+	"@type": "compartments",
+	compartments: [],
+};
+
+const EMTPY_DEVICES_MESSAGE: DevicesMessage = {
+	"@type": "devices",
+	devices: [],
+};
