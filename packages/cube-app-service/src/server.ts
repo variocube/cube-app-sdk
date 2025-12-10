@@ -89,6 +89,7 @@ export class Server {
 			autoStart: true,
 			debug: log.isVerboseEnabled() ? new Logger("controller-vcmp") : undefined,
 			customWebSocket: WebSocket,
+			reconnectTimeout: 3000,
 		});
 		this.#controller.onOpen = () => {
 			log.info("Controller connected.");
