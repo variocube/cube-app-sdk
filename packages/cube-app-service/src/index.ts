@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// Configure `ws` before other imports,
+// so vite puts these statements before the loading `ws`.
+import "./configureWs";
+
 import {getLogLevel, Logger} from "@variocube/driver-common";
 import {config} from "dotenv";
 import yargs from "yargs";
@@ -49,11 +53,6 @@ const argv = await yargs()
 	.help("h")
 	.alias("h", "help")
 	.parse(hideBin(process.argv));
-
-// Disable native optimizations in the `ws` package, so we
-// don't need to bundle native code for the different platforms.
-process.env.WS_NO_BUFFER_UTIL = "true";
-process.env.WS_NO_UTF_8_VALIDATE = "true";
 
 const server = new Server(argv);
 
