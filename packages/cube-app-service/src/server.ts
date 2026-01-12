@@ -3,6 +3,7 @@ import {
 	CompartmentsMessage,
 	DevicesMessage,
 	LockMessage,
+	LockStatus,
 	OpenLockMessage,
 	RestartOsMessage,
 	RestartUiMessage,
@@ -33,6 +34,7 @@ export class Server {
 
 	#compartments: CompartmentsMessage = EMPTY_COMPARTMENTS_MESSAGE;
 	#devices: DevicesMessage = EMTPY_DEVICES_MESSAGE;
+	#lockStatus: Record<string, LockStatus> = {};
 
 	constructor(options?: ServerOptions) {
 		const {host = "localhost", port = 4000, controllerHost = "localhost", controllerPort = 9000} = options ?? {};
@@ -58,6 +60,20 @@ export class Server {
 			log.info(`App connected.`);
 			session.send<CompartmentsMessage>(this.#compartments);
 			session.send<DevicesMessage>(this.#devices);
+
+			for (const compartment of this.#compartments.compartments) {
+				if (compartment.lock) {
+					const lockStatus = this.#lockStatus[compartment.lock];
+					if (lockStatus) {
+						session.send<LockMessage>({
+							"@type": "lock",
+							lock: compartment.lock,
+							compartmentNumber: compartment.number,
+							status: lockStatus,
+						});
+					}
+				}
+			}
 		};
 		this.#appServer.onSessionDisconnected = () => {
 			log.info("App disconnected.");
@@ -136,6 +152,7 @@ export class Server {
 
 		const handleLock = (message: LockMessage) => {
 			log.info(`Lock`, message);
+			this.#lockStatus[message.lock] = message.status;
 			this.#appServer.broadcast(message);
 		};
 		this.#mockServer.on<LockMessage>("lock", handleLock);
