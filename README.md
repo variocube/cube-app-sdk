@@ -136,7 +136,7 @@ If a cube does not have compartments, it is either unconfigured, or the connecti
 could not be established or was lost.
 
 ```typescript
-// You can check the length `connected` property
+// You can check the length of the `compartments` property
 if (cube.compartments.length == 0) {
 	console.error("No compartments.");
 }
