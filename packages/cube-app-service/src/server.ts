@@ -123,6 +123,22 @@ export class Server {
 
 		this.#appServer.on<OpenLockMessage>("openLock", async (message) => {
 			log.info(`Open lock`, message);
+
+			// If the lock is already open, the open command won't result
+			// in a lock OPENED event. We simulate the event here, in case
+			// the app did not check the status before opening the lock.
+			// We send the command to the locker anyway, to still perform
+			// the hardware action.
+			if (this.#lockStatus[message.lock] == "OPEN") {
+				this.#appServer.broadcast<LockMessage>({
+					"@type": "lock",
+					lock: message.lock,
+					status: "OPEN",
+					compartmentNumber: this.#compartments.compartments.find(compartment =>
+						compartment.lock == message.lock
+					)?.number,
+				});
+			}
 			await this.sendToLocker(message);
 		});
 		this.#appServer.on<RestartOsMessage>("restartOs", async (message) => {
