@@ -18,7 +18,7 @@ insert_final_newline = true
 [*.sh]
 
 # Language files: Lingohub insists on 2 spaces
-[**/i18n/*.json]
+[**/i18n/**/*.json]
 indent_style = space
 indent_size = 2
 

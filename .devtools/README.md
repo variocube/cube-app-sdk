@@ -2,26 +2,61 @@
 
 Variocube developer tools
 
-## Usage
+## Installation
 
-The code in this repository is intended to be installed into variocube projects by calling `devtools.sh init` in the
-project root. This will create a `.devtools` directory in the project root and copy the contents of this repository
-into it. The `.devtools` directory, its configuration file `.vc` and the created symlinks should be checked in.
-
-If you want to install directly from this repository just run the following command in the root of your project:
+Run this command in the root of your project:
 
 ```bash
-wget https://raw.githubusercontent.com/variocube/devtools/master/devtools.sh
-chmod +x devtools.sh
-./devtools.sh init
+wget -qO- https://raw.githubusercontent.com/variocube/devtools/main/devtools.sh | bash
 ```
 
-### Upgrading devtools
+This will:
+1. Download and install devtools into `.devtools/`
+2. Create symlinks for configuration files
+3. Set up IntelliJ IDEA and GitHub templates
 
-If a user wants to upgrade devtools, he can call `devtools.sh upgrade` in the project root. This will pull the latest
-version into the `.devtools` directory and overwrite the symlinks.
+Commit the `.devtools` directory and created symlinks to your repository.
+
+## Updating
+
+To update to the latest version:
+
+```bash
+./devtools.sh update
+```
+
+Or simply run without arguments:
+
+```bash
+./devtools.sh
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `./devtools.sh` | Install or update devtools |
+| `./devtools.sh update` | Alias for install/update |
+| `./devtools.sh db:create` | Create local MySQL database |
+| `./devtools.sh db:drop` | Drop local MySQL database |
+| `./devtools.sh db:import` | Import database from S3 backup |
+| `./devtools.sh db:import -d file.sql` | Import specific dump file |
+| `./devtools.sh db:clean` | Delete downloaded database dumps |
+| `./devtools.sh logs` | Tail CloudWatch logs (default: app stage) |
+| `./devtools.sh logs -s prod` | Tail logs for specific stage |
+| `./devtools.sh help` | Show help message |
 
 ## Configuration
+
+Configuration is stored in `.vc` and created interactively when needed. You'll be prompted for values the first time you use a command that requires them.
+
+Available settings:
+- `DATABASE_NAME` - Database name for local MySQL operations
+- `VC_AWS_PROFILE` - AWS CLI profile name
+- `VC_AWS_REGION` - AWS region
+- `CLOUD_WATCH_LOG_GROUP_<stage>` - CloudWatch log group per stage
+
+## Included Tools
 
 ### EditorConfig
 
@@ -40,12 +75,12 @@ Add the `dprint` package to your project:
 npm install --save-dev dprint
 ```
 
-You can use the provided configuration or if needed, create a project-specific configuration that
+You can use the provided configuration or create a project-specific configuration that
 extends the provided configuration.
 
 #### Extend the provided configuration
 
-Create a `dprint.json` file that extends the provided configuration
+Create a `dprint.json` file that extends the provided configuration:
 
 ```json
 {
@@ -53,15 +88,12 @@ Create a `dprint.json` file that extends the provided configuration
 }
 ```
 
-Add it to git and commit:
-
-```shell
-git add dprint.json
-git commit -m "chore: add dprint.json that extends devtools"
-```
-
 #### Configure IntelliJ
 
 Install the `dprint` plugin for IntelliJ and enable it in settings.
 
-Add and commit the config files created for the `dprint` plugin in the `.idea` directory. 
+The devtools installation automatically links the necessary IDEA configuration files.
+
+## Notes
+
+**Linux users:** Leave the MySQL password empty when prompted to use sudo for root access.

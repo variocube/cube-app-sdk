@@ -1,0 +1,6 @@
+<component name="EclipseCodeFormatterProjectSettings">
+  <option name="selectedJavaProfile" value="Variocube" />
+  <option name="pathToConfigFileJava" value="$PROJECT_DIR$/.devtools/eclipse-formatter.xml" />
+  <option name="enabledByDefault" value="true" />
+  <option name="enableJavaFormatting" value="true" />
+</component>
