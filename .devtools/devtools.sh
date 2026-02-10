@@ -98,6 +98,73 @@ sed_inplace() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Git Functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+is_git_repo() {
+	git rev-parse --is-inside-work-tree &>/dev/null
+}
+
+get_devtools_files() {
+	echo ".devtools"
+	echo "devtools.sh"
+	echo ".editorconfig"
+	echo "dprint.json"
+	echo ".claude/rules/devtools-guidelines.md"
+	echo ".idea/dprintProjectConfig.xml"
+	echo ".idea/dprintUserConfig.xml"
+	echo ".idea/eclipseCodeFormatter.xml"
+	echo ".github/ISSUE_TEMPLATE.md"
+	echo ".github/PULL_REQUEST_TEMPLATE.md"
+}
+
+commit_devtools() {
+	if ! is_git_repo; then
+		die "Not a git repository. Cannot commit."
+	fi
+
+	info "Staging devtools files..."
+	local files
+	files=$(get_devtools_files)
+	local staged=0
+
+	while IFS= read -r file; do
+		if [[ -e "$file" ]] || [[ -L "$file" ]]; then
+			git add "$file" 2>/dev/null && ((staged++)) || true
+		fi
+	done <<< "$files"
+
+	if [[ "$staged" -eq 0 ]]; then
+		warn "No devtools files found to stage."
+		return 1
+	fi
+
+	# Check if there are staged changes
+	if git diff --cached --quiet; then
+		info "No changes to commit."
+		return 1
+	fi
+
+	info "Committing..."
+	git commit -m "chore: update devtools to v${VERSION}" || die "Failed to commit"
+	success "Committed devtools v${VERSION}"
+	return 0
+}
+
+push_devtools() {
+	if ! is_git_repo; then
+		die "Not a git repository. Cannot push."
+	fi
+
+	local branch
+	branch=$(git rev-parse --abbrev-ref HEAD)
+
+	info "Pushing to origin/${branch}..."
+	git push origin "$branch" || die "Failed to push"
+	success "Pushed to origin/${branch}"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Configuration Management
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -228,6 +295,8 @@ run_mysql() {
 
 install_devtools() {
 	local target_dir="$1"
+	local do_commit="${2:-0}"
+	local do_push="${3:-0}"
 
 	require_cmd wget
 	require_cmd unzip
@@ -283,10 +352,21 @@ install_devtools() {
 	popd > /dev/null
 
 	success "Devtools v${VERSION} installed successfully!"
-	echo
-	echo "Next steps:"
-	echo "  1. Review and commit the .devtools directory and symlinks"
-	echo "  2. Run ${BOLD}./devtools.sh help${RESET} to see available commands"
+
+	# Handle commit and push
+	if [[ "$do_commit" == "1" ]]; then
+		echo
+		if commit_devtools; then
+			if [[ "$do_push" == "1" ]]; then
+				push_devtools
+			fi
+		fi
+	else
+		echo
+		echo "Next steps:"
+		echo "  1. Review and commit the .devtools directory and symlinks"
+		echo "  2. Run ${BOLD}./devtools.sh help${RESET} to see available commands"
+	fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -436,6 +516,8 @@ show_help() {
 	${BOLD}COMMANDS${RESET}
 	    ${BOLD}(no args)${RESET}      Install or update devtools
 	    ${BOLD}update${RESET}         Alias for install/update
+	                   --commit    Commit changes after install
+	                   --push      Commit and push changes after install
 
 	    ${BOLD}db:create${RESET}      Create local MySQL database
 	    ${BOLD}db:drop${RESET}        Drop local MySQL database
@@ -505,6 +587,20 @@ main() {
 	local script_dir
 	script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
+	# Parse long options first
+	local do_commit=0
+	local do_push=0
+	local args=()
+
+	for arg in "$@"; do
+		case "$arg" in
+			--commit) do_commit=1 ;;
+			--push) do_commit=1; do_push=1 ;;
+			*) args+=("$arg") ;;
+		esac
+	done
+	set -- "${args[@]}"
+
 	# Parse command
 	local command="${1:-}"
 	shift || true
@@ -533,7 +629,7 @@ main() {
 			else
 				info "Installing devtools in ${WORK_DIR}..."
 			fi
-			install_devtools "$WORK_DIR"
+			install_devtools "$WORK_DIR" "$do_commit" "$do_push"
 			;;
 		db:create)
 			cmd_db_create
