@@ -1,6 +1,7 @@
 name: CI
 on: [push, pull_request]
 permissions:
+  id-token: write  # Required for OIDC
   contents: write
 jobs:
   build:
@@ -17,8 +18,7 @@ jobs:
     - run: npm run test
     - if: startsWith(github.ref, 'refs/tags/')
       run: npx lerna publish from-git --yes --no-private
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
     - run: ./build_debian.sh
 
     - if: startsWith(github.ref, 'refs/tags/')
