@@ -1,6 +1,6 @@
 {
   "name": "@variocube/cube-app-mock",
-  "version": "1.0.0-beta.4",
+  "version": "1.0.0",
   "description": "Mock UI for the Variocube Cube-App SDK",
   "main": "dist/index.js",
   "private": true,
@@ -19,7 +19,7 @@
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "devDependencies": {
-    "@variocube/cube-app-sdk": "^1.0.0-beta.3"
+    "@variocube/cube-app-sdk": "^1.0.0"
   },
   "files": [
     "dist/**"
