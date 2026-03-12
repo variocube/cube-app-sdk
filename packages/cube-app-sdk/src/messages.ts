@@ -28,6 +28,15 @@ export interface RestartUiMessage extends VcmpMessage {
 	"@type": "restartUi";
 }
 
+export interface RestartControllerMessage extends VcmpMessage {
+	"@type": "restartController";
+}
+
+export interface RestartDeviceMessage extends VcmpMessage {
+	"@type": "restartDevice";
+	deviceId: string;
+}
+
 export interface CodeMessage extends VcmpMessage {
 	"@type": "code";
 	code: string;

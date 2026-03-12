@@ -10,6 +10,8 @@ import {
 	LockMessage,
 	LockStatus,
 	OpenLockMessage,
+	RestartControllerMessage,
+	RestartDeviceMessage,
 	RestartOsMessage,
 	RestartUiMessage,
 } from "@variocube/cube-app-sdk";
@@ -98,6 +100,14 @@ function App() {
 			setTimeout(() => {
 				setRestarting(undefined);
 			}, 5000);
+		});
+		client.on<RestartControllerMessage>("restartController", () => {
+			setRestarting("Restarting Controller...");
+			setTimeout(() => setRestarting(undefined), 5000);
+		});
+		client.on<RestartDeviceMessage>("restartDevice", ({deviceId}) => {
+			setRestarting(`Restarting device ${deviceId}...`);
+			setTimeout(() => setRestarting(undefined), 5000);
 		});
 		client.onOpen = async () => {
 			await client.send<CompartmentsMessage>({

@@ -255,6 +255,21 @@ export interface Cube {
 	restartOperatingSystem(): Promise<void>;
 
 	/**
+	 * Restarts the controller service of the cube.
+	 * @return A promise that resolves when the restart command was successfully issued.
+	 * @throws Error if the restart command could not be passed to the service.
+	 */
+	restartController(): Promise<void>;
+
+	/**
+	 * Restarts the specified device (driver).
+	 * @param deviceId The id of the device to restart.
+	 * @return A promise that resolves when the restart command was successfully issued.
+	 * @throws Error if the restart command could not be passed to the service.
+	 */
+	restartDevice(deviceId: string): Promise<void>;
+
+	/**
 	 * Closes the connection to the cube app service.
 	 */
 	close(): void;
