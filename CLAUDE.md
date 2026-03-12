@@ -77,6 +77,7 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 This project follows Variocube coding standards. See `.devtools/PROJECT_CLAUDE.md` and `.devtools/guidelines/` for details.
 
 ### Key Points
+
 - Tabs for indentation, 120 char line width
 - dprint for TypeScript/JSON/Markdown formatting
 - TypeScript strict mode enabled
@@ -92,6 +93,7 @@ Currently no unit tests are configured. The test script is a placeholder.
 ## Publishing
 
 Publishing is handled automatically by CI when a tag is pushed:
+
 1. Run `./release.sh` which invokes `lerna version`
 2. Push the tag
 3. CI publishes to npm under `@variocube` scope

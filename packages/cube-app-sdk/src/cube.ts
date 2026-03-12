@@ -1,5 +1,13 @@
 import {VcmpClient} from "@variocube/vcmp";
-import type {CodeMessage, CompartmentsMessage, DevicesMessage, LockMessage, OpenLockMessage} from "./messages";
+import type {
+	CodeMessage,
+	CompartmentsMessage,
+	DevicesMessage,
+	LockMessage,
+	OpenLockMessage,
+	RestartControllerMessage,
+	RestartDeviceMessage,
+} from "./messages";
 import type {
 	CloseEvent,
 	CodeEvent,
@@ -107,6 +115,19 @@ export class CubeImpl implements Cube {
 	async restartOperatingSystem() {
 		await this.#client.send({
 			"@type": "restartOs",
+		});
+	}
+
+	async restartController() {
+		await this.#client.send<RestartControllerMessage>({
+			"@type": "restartController",
+		});
+	}
+
+	async restartDevice(deviceId: string) {
+		await this.#client.send<RestartDeviceMessage>({
+			"@type": "restartDevice",
+			deviceId,
 		});
 	}
 

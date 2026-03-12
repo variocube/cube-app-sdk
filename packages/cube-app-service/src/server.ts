@@ -5,6 +5,8 @@ import {
 	LockMessage,
 	LockStatus,
 	OpenLockMessage,
+	RestartControllerMessage,
+	RestartDeviceMessage,
 	RestartOsMessage,
 	RestartUiMessage,
 } from "@variocube/cube-app-sdk";
@@ -131,6 +133,14 @@ export class Server {
 		});
 		this.#appServer.on<RestartUiMessage>("restartUi", async (message) => {
 			log.info(`Restart UI`, message);
+			await this.sendToLocker(message);
+		});
+		this.#appServer.on<RestartControllerMessage>("restartController", async (message) => {
+			log.info(`Restart controller`, message);
+			await this.sendToLocker(message);
+		});
+		this.#appServer.on<RestartDeviceMessage>("restartDevice", async (message) => {
+			log.info(`Restart device`, message);
 			await this.sendToLocker(message);
 		});
 
