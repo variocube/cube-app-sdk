@@ -39,9 +39,11 @@
 		<setting id="org.eclipse.jdt.core.formatter.keep_simple_while_body_on_same_line" value="false"/>
 		<setting id="org.eclipse.jdt.core.formatter.keep_simple_do_while_body_on_same_line" value="false"/>
 
-		<!-- Wrapping: chop down if long (one line if fits, else each element on own line) -->
-		<!-- Value 80 = M_NEXT_PER_LINE_SPLIT (chop down if long) -->
-		<setting id="org.eclipse.jdt.core.formatter.alignment_for_parameters_in_method_declaration" value="80"/>
+		<!-- Wrapping settings -->
+		<!-- Value 48 = M_ONE_PER_LINE_SPLIT (one per line when wrapping needed) -->
+		<!-- Value 81 = M_NEXT_PER_LINE_SPLIT (80) + M_FORCE (1) = always wrap, first stays -->
+		<setting id="org.eclipse.jdt.core.formatter.alignment_for_parameters_in_method_declaration" value="48"/>
+		<setting id="org.eclipse.jdt.core.formatter.alignment_for_parameters_in_constructor_declaration" value="48"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_arguments_in_method_invocation" value="80"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_arguments_in_explicit_constructor_call" value="80"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_arguments_in_allocation_expression" value="80"/>
@@ -57,13 +59,14 @@
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_expressions_in_array_initializer" value="80"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_conditional_expression" value="80"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_binary_expression" value="16"/>
-		<setting id="org.eclipse.jdt.core.formatter.alignment_for_record_components" value="80"/>
+		<setting id="org.eclipse.jdt.core.formatter.alignment_for_record_components" value="48"/>
+		<setting id="org.eclipse.jdt.core.formatter.alignment_for_enum_constants" value="49"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_expressions_in_switch_case_with_arrow" value="16"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_expressions_in_switch_case_with_colon" value="16"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_switch_case_with_arrow_expression" value="16"/>
 		<setting id="org.eclipse.jdt.core.formatter.alignment_for_method_declaration" value="0"/>
-		<setting id="org.eclipse.jdt.core.formatter.alignment_for_assignment" value="16"/>
-		<setting id="org.eclipse.jdt.core.formatter.alignment_for_selector_in_method_invocation" value="80"/>
+		<setting id="org.eclipse.jdt.core.formatter.alignment_for_assignment" value="0"/>
+		<setting id="org.eclipse.jdt.core.formatter.alignment_for_selector_in_method_invocation" value="81"/>
 
 		<!-- Method chaining: wrap before dot -->
 		<setting id="org.eclipse.jdt.core.formatter.wrap_before_or_operator_multicatch" value="true"/>
@@ -71,7 +74,7 @@
 
 		<!-- Parentheses positions when wrapping -->
 		<setting id="org.eclipse.jdt.core.formatter.parentheses_positions_in_method_invocation" value="separate_lines_if_wrapped"/>
-		<setting id="org.eclipse.jdt.core.formatter.parentheses_positions_in_method_declaration" value="separate_lines_if_wrapped"/>
+		<setting id="org.eclipse.jdt.core.formatter.parentheses_positions_in_method_declaration" value="separate_lines"/>
 		<setting id="org.eclipse.jdt.core.formatter.parentheses_positions_in_enum_constant_declaration" value="separate_lines_if_wrapped"/>
 		<setting id="org.eclipse.jdt.core.formatter.parentheses_positions_in_record_declaration" value="separate_lines_if_wrapped"/>
 		<setting id="org.eclipse.jdt.core.formatter.parentheses_positions_in_annotation" value="separate_lines_if_wrapped"/>
@@ -125,6 +128,8 @@
 		<setting id="org.eclipse.jdt.core.formatter.insert_space_before_closing_paren_in_method_invocation" value="do not insert"/>
 		<setting id="org.eclipse.jdt.core.formatter.insert_space_after_colon_in_for" value="insert"/>
 		<setting id="org.eclipse.jdt.core.formatter.insert_space_before_colon_in_for" value="insert"/>
+		<setting id="org.eclipse.jdt.core.formatter.insert_space_before_colon_in_case" value="do not insert"/>
+		<setting id="org.eclipse.jdt.core.formatter.insert_space_before_colon_in_default" value="do not insert"/>
 
 		<!-- Comments / Javadoc -->
 		<setting id="org.eclipse.jdt.core.formatter.comment.line_length" value="120"/>

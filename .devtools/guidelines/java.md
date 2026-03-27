@@ -84,5 +84,4 @@ The plugin is pre-configured by devtools to use `.devtools/eclipse-formatter.xml
 * Use `Map.ofEntries()` with `Map.entry()` for immutable maps.
 
 ## Imports
-* Never use wildcard imports.
 * Use Jakarta EE packages (`jakarta.persistence`, `jakarta.validation`), not `javax`.

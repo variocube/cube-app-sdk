@@ -8,6 +8,7 @@ This project uses Variocube coding standards. Follow these guidelines:
 - [Java Guidelines](.devtools/guidelines/java.md) - Lombok, null handling, Spotless
 - [TypeScript Guidelines](.devtools/guidelines/typescript.md) - Strict mode, types, dprint
 - [React Guidelines](.devtools/guidelines/react.md) - Components, hooks, state management
+- [UI/UX Patterns](.devtools/guidelines/ui-ux.md) - Views, lists, forms, deletion
 - [Spring Boot Guidelines](.devtools/guidelines/spring-boot.md) - Architecture, testing, configuration
 
 ## Quick Reference

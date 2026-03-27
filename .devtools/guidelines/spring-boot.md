@@ -43,6 +43,7 @@ Each application consists of four layers/modules with clearly defined dependenci
 * Contains the application's logic (commands) and depends on the domain model and outbound adapters.
 * Each command that the application implements goes into a separate class, e.g. `GetOrder`, `CreateOrder` or `CalculateOrderTotal`.
   * The class has a single public method to invoke the functionality, e.g. `Order createOrder(String tenantId, @Valid OrderCreation orderCreation)`.
+  * The name of the single public method is the same as the class name but with a lowercase first letter, e.g., class `CreateOrder` has public method `createOrder`.
   * There might be a number of private methods to further structure the implementation.
   * The class is a bean annotated with `@Component`.
 * If there is shared functionality between such command classes, it can be extracted into a package-private helper command.
