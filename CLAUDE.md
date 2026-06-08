@@ -74,7 +74,7 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 
 ## Code Style
 
-This project follows Variocube coding standards. See `.devtools/PROJECT_CLAUDE.md` and `.devtools/guidelines/` for details.
+This project follows Variocube coding standards.
 
 ### Key Points
 
