@@ -110,7 +110,6 @@ get_devtools_files() {
 	echo "devtools.sh"
 	echo ".editorconfig"
 	echo "dprint.json"
-	echo ".claude/rules/devtools-guidelines.md"
 	echo ".idea/dprintProjectConfig.xml"
 	echo ".idea/dprintUserConfig.xml"
 	echo ".idea/eclipseCodeFormatter.xml"
@@ -172,6 +171,40 @@ WORK_DIR="$(pwd)"
 CONFIG_FILE="${WORK_DIR}/.vc"
 DEVTOOLS_DIR="${WORK_DIR}/.devtools"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Central registry (workspace projects.json) — preferred source of truth.
+# Falls back silently to the per-repo .vc when the registry, jq, or a key is
+# missing, so this works whether or not the repo sits under the workspace.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Locate projects.json by walking up from the working directory.
+find_registry() {
+	local dir="$WORK_DIR"
+	while [[ -n "$dir" && "$dir" != "/" ]]; do
+		if [[ -f "$dir/projects.json" ]]; then
+			printf '%s' "$dir/projects.json"
+			return 0
+		fi
+		dir=$(dirname "$dir")
+	done
+	return 1
+}
+
+# registry_get <jq-filter> [extra jq args...]
+# Evaluates the filter with $p bound to the project (the repo directory name).
+# Prints the resolved value, or nothing if unavailable.
+registry_get() {
+	local filter="$1"; shift
+	local registry
+	registry=$(find_registry) || return 0
+	command -v jq &>/dev/null || return 0
+	local project value
+	project=$(basename "$WORK_DIR")
+	value=$(jq -r --arg p "$project" "$@" "$filter" "$registry" 2>/dev/null) || return 0
+	[[ "$value" == "null" ]] && value=""
+	printf '%s' "$value"
+}
+
 # Load configuration if it exists
 load_config() {
 	if [[ -f "$CONFIG_FILE" ]]; then
@@ -220,26 +253,35 @@ ensure_database_config() {
 ensure_aws_config() {
 	load_config
 
+	# Precedence: explicit env AWS_PROFILE/REGION > registry (source of truth) > .vc > prompt.
+	# The registry intentionally wins over .vc, which is deprecated and may be stale
+	# (e.g. smalox-cloud's .vc wrongly names the variocube profile).
+	local reg_profile reg_region
+	reg_profile=$(registry_get '(.projects[$p].aws // .defaults.aws).profile')
+	reg_region=$(registry_get '(.projects[$p].aws // .defaults.aws).region')
+
 	# Check AWS_PROFILE
 	if [[ -z "${AWS_PROFILE:-}" ]]; then
-		if [[ -z "${VC_AWS_PROFILE:-}" ]]; then
+		local profile="${reg_profile:-${VC_AWS_PROFILE:-}}"
+		if [[ -z "$profile" ]]; then
 			info "AWS profile not configured."
-			prompt VC_AWS_PROFILE "Enter the AWS profile name" "variocube"
-			save_config_value "VC_AWS_PROFILE" "$VC_AWS_PROFILE"
+			prompt profile "Enter the AWS profile name" "variocube"
+			save_config_value "VC_AWS_PROFILE" "$profile"
 			success "Saved VC_AWS_PROFILE to ${CONFIG_FILE}"
 		fi
-		export AWS_PROFILE="${VC_AWS_PROFILE}"
+		export AWS_PROFILE="$profile"
 	fi
 
 	# Check AWS_REGION
 	if [[ -z "${AWS_REGION:-}" ]]; then
-		if [[ -z "${VC_AWS_REGION:-}" ]]; then
+		local region="${reg_region:-${VC_AWS_REGION:-}}"
+		if [[ -z "$region" ]]; then
 			info "AWS region not configured."
-			prompt VC_AWS_REGION "Enter the AWS region" "eu-west-1"
-			save_config_value "VC_AWS_REGION" "$VC_AWS_REGION"
+			prompt region "Enter the AWS region" "eu-west-1"
+			save_config_value "VC_AWS_REGION" "$region"
 			success "Saved VC_AWS_REGION to ${CONFIG_FILE}"
 		fi
-		export AWS_REGION="${VC_AWS_REGION}"
+		export AWS_REGION="$region"
 	fi
 }
 
@@ -250,6 +292,15 @@ ensure_logs_config() {
 	ensure_aws_config
 
 	local log_group_var="CLOUD_WATCH_LOG_GROUP_${stage}"
+
+	# Registry wins over .vc (which load_config may have set into $log_group_var).
+	local registry_log_group
+	registry_log_group=$(registry_get '.projects[$p].stages[$stage].logGroup' --arg stage "$stage")
+	if [[ -n "$registry_log_group" ]]; then
+		declare -g "$log_group_var=$registry_log_group"
+	fi
+
+	# Fall back to .vc / interactive prompt only if still unset.
 	if [[ -z "${!log_group_var:-}" ]]; then
 		info "CloudWatch log group for stage '${stage}' not configured."
 		prompt LOG_GROUP "Enter the CloudWatch log group name"
@@ -323,6 +374,7 @@ install_devtools() {
 	rm -rf "${target_dir}/.devtools/.idea"
 	rm -rf "${target_dir}/.devtools/test"
 	rm -f "${target_dir}/.devtools/CLAUDE.md"
+	rm -f "${target_dir}/.devtools/.devtools"
 
 	info "Creating symlinks..."
 
@@ -334,9 +386,10 @@ install_devtools() {
 	ln -srf ".devtools/.editorconfig" ".editorconfig"
 	ln -srf ".devtools/dprint.json" "dprint.json"
 
-	# Claude Code rules
-	mkdir -p ".claude/rules"
-	ln -srf ".devtools/PROJECT_CLAUDE.md" ".claude/rules/devtools-guidelines.md"
+	# Coding guidelines and Claude context now live centrally in the workspace
+	# (variocube/.claude/, auto-loaded for every repo). Remove the obsolete per-repo
+	# symlink left by older devtools versions.
+	rm -f ".claude/rules/devtools-guidelines.md"
 
 	# IDEA settings
 	mkdir -p ".idea"
@@ -499,7 +552,7 @@ cmd_logs() {
 	local log_group_var="CLOUD_WATCH_LOG_GROUP_${stage}"
 	local log_group="${!log_group_var}"
 
-	info "Tailing logs from '${log_group}'..."
+	info "Tailing logs from '${log_group}' (profile=${AWS_PROFILE}, region=${AWS_REGION})..."
 	aws logs tail --follow --region "${AWS_REGION}" --profile "${AWS_PROFILE}" "$log_group"
 }
 

@@ -48,13 +48,18 @@ Or simply run without arguments:
 
 ## Configuration
 
-Configuration is stored in `.vc` and created interactively when needed. You'll be prompted for values the first time you use a command that requires them.
+AWS and log configuration is sourced from the **workspace registry** `projects.json` (located by
+walking up the directory tree), keyed by the repository's directory name. The `logs` and
+`db:import` commands read the AWS profile/region and per-stage CloudWatch log groups from there — no
+per-repo setup needed.
 
-Available settings:
-- `DATABASE_NAME` - Database name for local MySQL operations
-- `VC_AWS_PROFILE` - AWS CLI profile name
-- `VC_AWS_REGION` - AWS region
-- `CLOUD_WATCH_LOG_GROUP_<stage>` - CloudWatch log group per stage
+If the registry is unavailable, devtools falls back to a local `.vc` file (created interactively),
+then to a prompt. `.vc` is being phased out in favor of the registry.
+
+Settings still read from `.vc` when present:
+- `DATABASE_NAME` - Database name for local MySQL operations (not managed by the registry yet)
+- `VC_AWS_PROFILE` / `VC_AWS_REGION` - fallback AWS profile/region
+- `CLOUD_WATCH_LOG_GROUP_<stage>` - fallback CloudWatch log group per stage
 
 ## Included Tools
 

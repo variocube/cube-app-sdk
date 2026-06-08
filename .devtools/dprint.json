@@ -17,7 +17,13 @@
   "includes": ["**/*.{ts,tsx,js,jsx,cjs,mjs,json,md}"],
   "excludes": [
     "**/node_modules",
-    "**/*-lock.json"
+    "**/*-lock.json",
+    "**/build",
+    "**/dist",
+    "**/.vite",
+    "src/main/resources/static",
+    "**/test-results",
+    "**/playwright-report"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.77.0.wasm",
