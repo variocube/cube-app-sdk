@@ -13,8 +13,14 @@ import {
 } from "@variocube/cube-app-sdk";
 import React, {createContext, PropsWithChildren, useContext, useEffect, useMemo, useState} from "react";
 
-// Re-export the types from the SDK to make them available to consumers of the React SDK.
+// Re-export the SDK's types via `export type *` so runtime values like `connect` are NOT
+// re-exported — React SDK consumers should use CubeProvider instead of connecting directly.
+// The two runtime values that are genuinely useful (the `Symbology` enum and
+// `validateCodeReaderConfig`) are re-exported explicitly below.
+// `dprint-ignore` because dprint 0.77.0 wrongly strips the `type` from `export type *`.
+// dprint-ignore
 export type * from "@variocube/cube-app-sdk";
+export { Symbology, validateCodeReaderConfig } from "@variocube/cube-app-sdk";
 
 export type Locks = Record<string, LockStatus>;
 

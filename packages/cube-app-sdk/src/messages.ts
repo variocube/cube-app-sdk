@@ -1,5 +1,5 @@
 import {VcmpMessage} from "@variocube/vcmp";
-import {CompartmentsEvent, DevicesEvent, LockEvent} from "./types";
+import {CodeReaderConfig, CompartmentsEvent, DevicesEvent, LockEvent} from "./types";
 
 export interface OpenLockMessage extends VcmpMessage {
 	"@type": "openLock";
@@ -41,4 +41,9 @@ export interface CodeMessage extends VcmpMessage {
 	"@type": "code";
 	code: string;
 	source: "KEYPAD" | "SCANNER" | "NFC";
+}
+
+export interface ConfigureCodeReaderMessage extends VcmpMessage {
+	"@type": "configureCodeReader";
+	config: CodeReaderConfig;
 }
