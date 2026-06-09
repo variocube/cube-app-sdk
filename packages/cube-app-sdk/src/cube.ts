@@ -1,10 +1,9 @@
 import {validateBarcodeConfig} from "@variocube/driver-common";
-import type {BarcodeReaderConfig} from "@variocube/driver-common";
 import {VcmpClient} from "@variocube/vcmp";
 import type {
 	CodeMessage,
 	CompartmentsMessage,
-	ConfigureBarcodeReaderMessage,
+	ConfigureCodeReaderMessage,
 	DevicesMessage,
 	LockMessage,
 	OpenLockMessage,
@@ -14,6 +13,7 @@ import type {
 import type {
 	CloseEvent,
 	CodeEvent,
+	CodeReaderConfig,
 	Compartment,
 	CompartmentsEvent,
 	Cube,
@@ -134,14 +134,13 @@ export class CubeImpl implements Cube {
 		});
 	}
 
-	async configureBarcodeReader(deviceId: string, config: BarcodeReaderConfig) {
+	async configureCodeReader(config: CodeReaderConfig) {
 		const {valid, errors} = validateBarcodeConfig(config);
 		if (!valid) {
-			throw new Error(`Invalid barcode reader configuration: ${errors.join("; ")}`);
+			throw new Error(`Invalid code reader configuration: ${errors.join("; ")}`);
 		}
-		await this.#client.send<ConfigureBarcodeReaderMessage>({
-			"@type": "configureBarcodeReader",
-			deviceId,
+		await this.#client.send<ConfigureCodeReaderMessage>({
+			"@type": "configureCodeReader",
 			config,
 		});
 	}
