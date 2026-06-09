@@ -1,4 +1,4 @@
-import type {BarcodeReaderConfig} from "@variocube/driver-common";
+import type {BarcodeReaderConfig} from "@variocube/driver-common/barcode-reader/config";
 
 /**
  * Standardized configuration for a code reader.

@@ -1,4 +1,4 @@
-import {validateBarcodeConfig as validateCodeReaderConfig} from "@variocube/driver-common";
+import {validateBarcodeConfig as validateCodeReaderConfig} from "@variocube/driver-common/barcode-reader/config";
 import {VcmpClient} from "@variocube/vcmp";
 import type {
 	CodeMessage,

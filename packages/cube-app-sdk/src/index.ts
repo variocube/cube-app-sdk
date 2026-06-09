@@ -9,7 +9,12 @@ export * from "./types";
 // config types and validation without depending on @variocube/driver-common directly.
 // driver-common names these "barcode reader"; the SDK surfaces them as "code reader" because
 // the device decodes more than linear barcodes. `CodeReaderConfig` is re-exported from ./types.
-export { Symbology, validateBarcodeConfig as validateCodeReaderConfig } from "@variocube/driver-common";
+// Imported from the `barcode-reader/config` subpath, which is dependency-free, so consumers
+// never pull driver-common's Node-only `ws`/`chalk` graph into their bundle.
+export {
+	Symbology,
+	validateBarcodeConfig as validateCodeReaderConfig,
+} from "@variocube/driver-common/barcode-reader/config";
 export type {
 	IndicatorConfig,
 	OutputFormattingConfig,
@@ -17,4 +22,4 @@ export type {
 	ToneConfig,
 	TriggerTimingConfig,
 	ValidationResult,
-} from "@variocube/driver-common";
+} from "@variocube/driver-common/barcode-reader/config";
