@@ -115,6 +115,55 @@ await cube.restartOperatingSystem();
 await cube.restartUserInterface();
 ```
 
+### Configuring the code reader
+
+Push a standardized configuration to the connected code reader(s) — symbologies, indicators,
+trigger & timing, and output formatting. The config may be partial: the driver overlays it on its
+default profile and applies what the reader supports, silently skipping unsupported properties.
+
+```typescript
+import {Symbology} from "@variocube/cube-app-sdk";
+
+await cube.configureCodeReader({
+	symbologies: {
+		[Symbology.QR]: true,
+		[Symbology.Code128]: true,
+		[Symbology.EAN13]: false,
+	},
+	indicators: {
+		beeper: {enabled: true, volume: 80}, // volume/brightness are percentages, 0–100
+		led: {enabled: true, brightness: 50},
+	},
+	outputFormatting: {
+		terminator: "CRLF",
+	},
+});
+```
+
+The config is validated before it is sent. If it is invalid, `configureCodeReader` throws
+synchronously and nothing is sent:
+
+```typescript
+try {
+	await cube.configureCodeReader({indicators: {beeper: {volume: 150}}});
+}
+catch (error) {
+	// Error: Invalid code reader configuration: indicators.beeper.volume must be between 0 and 100
+}
+```
+
+You can run the same validation yourself, e.g. to give feedback in a settings UI before sending:
+
+```typescript
+import {validateCodeReaderConfig} from "@variocube/cube-app-sdk";
+
+const {valid, errors} = validateCodeReaderConfig(config);
+```
+
+> The config is applied to all connected code readers; there is no per-device targeting. In v1 the
+> driver only logs which properties it applied, skipped, or failed — no structured success/failure
+> result is returned to the app yet.
+
 ## Handling error conditions
 
 ### No connection to cube app service
