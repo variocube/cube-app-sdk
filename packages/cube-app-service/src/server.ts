@@ -1,6 +1,7 @@
 import {
 	CodeMessage,
 	CompartmentsMessage,
+	ConfigureBarcodeReaderMessage,
 	DevicesMessage,
 	LockMessage,
 	LockStatus,
@@ -141,6 +142,10 @@ export class Server {
 		});
 		this.#appServer.on<RestartDeviceMessage>("restartDevice", async (message) => {
 			log.info(`Restart device`, message);
+			await this.sendToLocker(message);
+		});
+		this.#appServer.on<ConfigureBarcodeReaderMessage>("configureBarcodeReader", async (message) => {
+			log.info(`Configure barcode reader`, message);
 			await this.sendToLocker(message);
 		});
 

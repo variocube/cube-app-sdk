@@ -1,3 +1,4 @@
+import {BarcodeReaderConfig} from "@variocube/driver-common";
 import {VcmpMessage} from "@variocube/vcmp";
 import {CompartmentsEvent, DevicesEvent, LockEvent} from "./types";
 
@@ -41,4 +42,10 @@ export interface CodeMessage extends VcmpMessage {
 	"@type": "code";
 	code: string;
 	source: "KEYPAD" | "SCANNER" | "NFC";
+}
+
+export interface ConfigureBarcodeReaderMessage extends VcmpMessage {
+	"@type": "configureBarcodeReader";
+	deviceId: string;
+	config: BarcodeReaderConfig;
 }

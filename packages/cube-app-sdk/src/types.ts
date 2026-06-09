@@ -1,3 +1,5 @@
+import type {BarcodeReaderConfig} from "@variocube/driver-common";
+
 /** The status of a lock. */
 export type LockStatus = "OPEN" | "CLOSED" | "BREAKIN" | "BLOCKED";
 
@@ -268,6 +270,21 @@ export interface Cube {
 	 * @throws Error if the restart command could not be passed to the service.
 	 */
 	restartDevice(deviceId: string): Promise<void>;
+
+	/**
+	 * Pushes a standardized configuration to a connected barcode reader.
+	 *
+	 * The config is validated synchronously before sending, using the shared validation
+	 * function from `@variocube/driver-common`. The driver overlays the (possibly partial)
+	 * config on its default vendor profile and applies what the reader supports; in v1 the
+	 * driver's apply-result is log-only, so no structured success/failure ack is returned.
+	 *
+	 * @param deviceId The id of the barcode reader device to configure.
+	 * @param config The standardized barcode reader configuration to apply.
+	 * @return A promise that resolves when the config was successfully passed to the service.
+	 * @throws Error if the config fails validation, or if the message could not be passed to the service.
+	 */
+	configureBarcodeReader(deviceId: string, config: BarcodeReaderConfig): Promise<void>;
 
 	/**
 	 * Closes the connection to the cube app service.
