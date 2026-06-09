@@ -1,4 +1,7 @@
 export * from "./connect.js";
+// `./messages` and `./types` are type-only modules, so these plain `export *` re-export
+// no runtime values. We don't write `export type *` here because dprint strips the `type`
+// keyword from a star re-export (see the dprint-ignore note in the React SDK's index).
 export * from "./messages";
 export * from "./types";
 

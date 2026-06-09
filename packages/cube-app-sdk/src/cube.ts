@@ -1,4 +1,4 @@
-import {validateBarcodeConfig} from "@variocube/driver-common";
+import {validateBarcodeConfig as validateCodeReaderConfig} from "@variocube/driver-common";
 import {VcmpClient} from "@variocube/vcmp";
 import type {
 	CodeMessage,
@@ -135,7 +135,7 @@ export class CubeImpl implements Cube {
 	}
 
 	async configureCodeReader(config: CodeReaderConfig) {
-		const {valid, errors} = validateBarcodeConfig(config);
+		const {valid, errors} = validateCodeReaderConfig(config);
 		if (!valid) {
 			throw new Error(`Invalid code reader configuration: ${errors.join("; ")}`);
 		}

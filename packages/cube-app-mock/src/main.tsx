@@ -5,6 +5,7 @@ import {
 	CodeMessage,
 	Compartment,
 	CompartmentsMessage,
+	ConfigureCodeReaderMessage,
 	Device,
 	DevicesMessage,
 	LockMessage,
@@ -108,6 +109,11 @@ function App() {
 		client.on<RestartDeviceMessage>("restartDevice", ({deviceId}) => {
 			setRestarting(`Restarting device ${deviceId}...`);
 			setTimeout(() => setRestarting(undefined), 5000);
+		});
+		client.on<ConfigureCodeReaderMessage>("configureCodeReader", ({config}) => {
+			// The mock has no real reader to configure; log the received config like the
+			// driver does in v1 so the pass-through is observable during local development.
+			console.info("Configure code reader", config);
 		});
 		client.onOpen = async () => {
 			await client.send<CompartmentsMessage>({
