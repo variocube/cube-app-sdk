@@ -20,7 +20,7 @@
   },
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "dependencies": {
-    "@variocube/driver-common": "^2.7.1",
+    "@variocube/driver-common": "^2.8.0",
     "@variocube/vcmp": "^2.3.0"
   },
   "files": [
