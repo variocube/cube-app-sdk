@@ -92,8 +92,12 @@ Currently no unit tests are configured. The test script is a placeholder.
 
 ## Publishing
 
-Publishing is handled automatically by CI when a tag is pushed:
+Releases are cut by creating a **GitHub Release**; CI does the rest. The versions committed in the
+repo stay at `0.0.0` — the published version comes from the release tag.
 
-1. Run `./release.sh` which invokes `lerna version`
-2. Push the tag
-3. CI publishes to npm under `@variocube` scope
+1. Create the release: `./release.sh <version>` (wraps `gh release create <version> --target main --generate-notes`), or create it from the GitHub UI. Tags may be `1.3.0` or `v1.3.0`.
+2. The `release: published` event triggers CI, which:
+   - stamps the tag's version into every package via `lerna version --no-git-tag-version`,
+   - publishes the public packages to npm (`lerna publish from-package`) under `@variocube`,
+   - builds the `cube-app-service` `.deb` and uploads it to the apt repository,
+   - deploys the demo to GitHub Pages.

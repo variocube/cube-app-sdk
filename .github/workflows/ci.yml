@@ -1,5 +1,10 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  release:
+    types: [published]
 permissions:
   id-token: write  # Required for OIDC
   contents: write
@@ -14,21 +19,34 @@ jobs:
         registry-url: https://registry.npmjs.org
         scope: '@variocube'
     - run: npm ci
+
+    # On a GitHub Release, stamp the version from the release tag into every
+    # package (the repo itself stays at 0.0.0). Tag may be `1.2.3` or `v1.2.3`.
+    - if: github.event_name == 'release'
+      run: |
+        VERSION="${{ github.event.release.tag_name }}"
+        VERSION="${VERSION#v}"
+        # The release event checks out a detached HEAD; put it on a throwaway
+        # branch so lerna is happy. Nothing is committed or pushed.
+        git checkout -B release-build
+        npx lerna version "$VERSION" --no-git-tag-version --no-push --force-publish --yes
+
     - run: npm run build
     - run: npm run test
-    - if: startsWith(github.ref, 'refs/tags/')
-      run: npx lerna publish from-git --yes --no-private
+
+    - if: github.event_name == 'release'
+      run: npx lerna publish from-package --yes --no-private
 
     - run: ./build_debian.sh
 
-    - if: startsWith(github.ref, 'refs/tags/')
+    - if: github.event_name == 'release'
       run: |
         aws s3 cp --region eu-west-1 dpkg/ s3://og-repository/packages/ --recursive --exclude "*" --include "variocube-cube-app-service_*.deb"
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-    - if: startsWith(github.ref, 'refs/tags/')
+    - if: github.event_name == 'release'
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         folder: ./packages/cube-app-demo/dist # The folder the action should deploy.
