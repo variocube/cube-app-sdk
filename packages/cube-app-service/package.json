@@ -22,7 +22,7 @@
   "devDependencies": {
     "@variocube/cube-app-mock": "^0.0.0",
     "@variocube/driver-common": "^2.8.0",
-    "@variocube/vcmp-server": "^2.4.0",
+    "@variocube/vcmp-server": "^4.0.0",
     "dotenv": "^16.5.0",
     "yargs": "^17.7.2"
   },
