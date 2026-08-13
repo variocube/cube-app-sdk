@@ -29,7 +29,7 @@
     "@types/react-dom": "^19.1.6",
     "@types/ws": "^8.18.1",
     "@types/yargs": "^17.0.33",
-    "@variocube/vcmp": "^2.3.0",
+    "@variocube/vcmp": "^4.0.0",
     "@vitejs/plugin-react": "^4.6.0",
     "dprint": "^0.50.1",
     "lerna": "^9.0.1",
