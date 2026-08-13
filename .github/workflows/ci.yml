@@ -27,9 +27,13 @@ jobs:
         VERSION="${{ github.event.release.tag_name }}"
         VERSION="${VERSION#v}"
         # The release event checks out a detached HEAD; put it on a throwaway
-        # branch so lerna is happy. Nothing is committed or pushed.
+        # branch so lerna is happy. The stamped versions are committed on that
+        # branch only (lerna publish refuses a dirty working tree); nothing is
+        # ever pushed.
         git checkout -B release-build
         npx lerna version "$VERSION" --no-git-tag-version --no-push --force-publish --yes
+        git -c user.name="github-actions" -c user.email="github-actions@github.com" \
+          commit -am "v$VERSION (release build only, never pushed)"
 
     - run: npm run build
     - run: npm run test
