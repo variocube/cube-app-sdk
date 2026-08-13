@@ -61,8 +61,13 @@ export class Server {
 		});
 		this.#appServer.onSessionConnected = (session) => {
 			log.info(`App connected.`);
-			session.send<CompartmentsMessage>(this.#compartments);
-			session.send<DevicesMessage>(this.#devices);
+			// Fire-and-forget sends need a rejection handler: the app reloading or
+			// navigating right after connecting closes the session while these are still
+			// pending, and an unhandled rejection would exit the process.
+			session.send<CompartmentsMessage>(this.#compartments)
+				.catch(error => log.warn("Could not deliver compartments to app", error));
+			session.send<DevicesMessage>(this.#devices)
+				.catch(error => log.warn("Could not deliver devices to app", error));
 
 			for (const compartment of this.#compartments.compartments) {
 				if (compartment.lock) {
@@ -73,7 +78,7 @@ export class Server {
 							lock: compartment.lock,
 							compartmentNumber: compartment.number,
 							status: lockStatus,
-						});
+						}).catch(error => log.warn("Could not deliver lock status to app", error));
 					}
 				}
 			}
