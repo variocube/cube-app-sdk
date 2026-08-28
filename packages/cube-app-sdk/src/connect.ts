@@ -1,5 +1,5 @@
 import {CubeImpl} from "./cube.js";
-import type {Cube} from "./types";
+import type {Cube} from "./types.js";
 
 export interface ConnectOptions {
 	/** The host where the cube app service runs on. */

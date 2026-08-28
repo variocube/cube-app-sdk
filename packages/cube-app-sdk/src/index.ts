@@ -1,9 +1,11 @@
 export * from "./connect.js";
-// `./messages` and `./types` are type-only modules, so these plain `export *` re-export
-// no runtime values. We don't write `export type *` here because dprint strips the `type`
-// keyword from a star re-export (see the dprint-ignore note in the React SDK's index).
-export * from "./messages";
-export * from "./types";
+// `./messages` and `./types` are type-only modules. Use `export type *` so nothing is emitted
+// to JS: a plain `export *` is emitted verbatim (with an extensionless specifier that Node's
+// ESM loader cannot resolve). `dprint-ignore` because dprint 0.77.0 strips the `type` keyword.
+// dprint-ignore
+export type * from "./messages.js";
+// dprint-ignore
+export type * from "./types.js";
 
 // Re-export the standardized code reader configuration so app developers can consume the
 // config types and validation without depending on @variocube/driver-common directly.

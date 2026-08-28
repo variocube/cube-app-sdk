@@ -9,7 +9,7 @@ import type {
 	OpenLockMessage,
 	RestartControllerMessage,
 	RestartDeviceMessage,
-} from "./messages";
+} from "./messages.js";
 import type {
 	CloseEvent,
 	CodeEvent,
@@ -23,7 +23,7 @@ import type {
 	LockEvent,
 	OpenContext,
 	OpenEvent,
-} from "./types";
+} from "./types.js";
 
 type EventMap = {
 	"code": CodeEvent;
