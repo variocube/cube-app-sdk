@@ -1,5 +1,5 @@
 import {VcmpMessage} from "@variocube/vcmp";
-import {CodeReaderConfig, CompartmentsEvent, DevicesEvent, LockEvent} from "./types";
+import {CodeReaderConfig, CompartmentsEvent, DevicesEvent, LockEvent} from "./types.js";
 
 export interface OpenLockMessage extends VcmpMessage {
 	"@type": "openLock";
