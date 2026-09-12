@@ -1,4 +1,5 @@
 import type {BarcodeReaderConfig} from "@variocube/driver-common/barcode-reader/config";
+import type {CubeError} from "./errors.js";
 
 /**
  * Standardized configuration for a code reader.
@@ -174,7 +175,157 @@ export interface OpenContext {
 /** An event listener */
 export type EventListener<E> = (event: E) => any;
 
+export type AvailabilityStatus = "loading" | "ready" | "unavailable" | "error";
+
+export interface AvailabilityState {
+	status: AvailabilityStatus;
+	error?: CubeError;
+}
+
+export interface CubeCapabilities {
+	occupancies: boolean;
+	storage: boolean;
+	identity: boolean;
+}
+
+/** The controller chooses appId and token audience. expiresAt is Unix epoch seconds. */
+export interface CubeIdentity {
+	cubeId: string;
+	appId: string | null;
+	token: string | null;
+	expiresAt: number | null;
+}
+
+export type OccupancyContent = Record<string, unknown>;
+
+/** Complete controller /app occupancy payload, including pending reservations. */
+export interface Occupancy {
+	uuid: string;
+	appId: string;
+	boxNumber: string;
+	accessCode: string | null;
+	accessKeys: string[];
+	created: string;
+	content: OccupancyContent | null;
+	actor: string | null;
+	action: string | null;
+	state: "pending" | "confirmed" | "ended";
+}
+
+export interface AccessCodeShape {
+	alphabet: string;
+	length: number;
+}
+
+export interface OccupyCommon extends OpenContext {
+	accessCode?: string;
+	accessCodeShape?: AccessCodeShape;
+	accessKeys?: string[];
+	content?: OccupancyContent;
+}
+
+export interface OccupyType extends OccupyCommon {
+	type: string;
+	group?: string;
+	accessible?: boolean;
+	cooled?: boolean;
+	dangerousGoods?: boolean;
+	charger?: boolean;
+}
+
+export interface OccupyBox extends OccupyCommon {
+	boxNumber: string;
+}
+
+export type OccupyRequest = OccupyType | OccupyBox;
+
+export interface UpdateOccupancyOptions extends OpenContext {
+	content?: OccupancyContent;
+	merge?: boolean;
+}
+
+export interface ChangeOccupancyAccessOptions extends OpenContext {
+	accessCode?: string;
+	accessCodeShape?: AccessCodeShape;
+	accessKeys?: string[];
+}
+
+export interface EndOccupancyOptions extends UpdateOccupancyOptions {
+	/** Seconds before an ended occupancy's box can be allocated again. */
+	gracePeriod?: number;
+}
+
+export interface OccupancyState extends AvailabilityState {
+	/** Undefined until an authoritative snapshot is available, including after disconnect/app changes. */
+	data?: Occupancy[];
+}
+
+export interface Occupancies {
+	readonly state: OccupancyState;
+	readonly snapshot: Occupancy[] | undefined;
+	occupy(request: OccupyRequest): Promise<Occupancy>;
+	occupyType(request: OccupyType): Promise<Occupancy>;
+	occupyBox(request: OccupyBox): Promise<Occupancy>;
+	confirm(uuid: string, content?: OccupancyContent, merge?: boolean): Promise<void>;
+	cancel(uuid: string): Promise<void>;
+	update(uuid: string, options: UpdateOccupancyOptions): Promise<void>;
+	changeAccess(uuid: string, options: ChangeOccupancyAccessOptions): Promise<void>;
+	end(uuid: string, options?: EndOccupancyOptions): Promise<void>;
+	list(access?: string): Promise<Occupancy[]>;
+	get(uuid: string): Promise<Occupancy>;
+}
+
+export interface StorageItem {
+	key: string;
+	contentType: string;
+	encoding: "json" | "base64";
+	content: unknown;
+}
+
+/** Controller-backed, Center-write-only storage. No browser persistence is used. */
+export interface CubeStorage {
+	readonly state: AvailabilityState;
+	/** Reads JSON, preserving JSON null. Missing/deleted documents reject with NOT_FOUND. */
+	get<T>(key: string): Promise<T>;
+	getBlob(key: string): Promise<Blob>;
+	keys(): Promise<string[]>;
+}
+
+export interface IdentityEvent {
+	identity: CubeIdentity | undefined;
+}
+
+export interface StorageEvent {
+	key: string;
+}
+
+export interface CapabilitiesEvent {
+	capabilities: CubeCapabilities | undefined;
+}
+
+export interface AvailabilityEvent {
+	occupancies: OccupancyState;
+	storage: AvailabilityState;
+}
+
+export interface OccupancyChangedEvent {
+	occupancy: Occupancy;
+}
+
+export interface OccupancyEndedEvent {
+	uuid: string;
+}
+
 export interface Cube {
+	readonly occupancies: Occupancies;
+	readonly storage: CubeStorage;
+	readonly identity: CubeIdentity | undefined;
+	readonly capabilities: CubeCapabilities | undefined;
+	/** Uses the installed app audience, sharing concurrent refreshes. Never takes an audience argument. */
+	getToken(): Promise<string>;
+	setBoxMaintenance(boxNumber: string, required: boolean): Promise<void>;
+	requireBoxMaintenance(boxNumber: string): Promise<void>;
+
 	/**
 	 * Adds an event listener.
 	 * @param eventName The event name
@@ -186,6 +337,15 @@ export interface Cube {
 	addEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
 	addEventListener(eventName: "compartments", listener: EventListener<CompartmentsEvent>): void;
 	addEventListener(eventName: "devices", listener: EventListener<DevicesEvent>): void;
+	addEventListener(eventName: "occupancies", listener: EventListener<OccupancyState>): void;
+	addEventListener(eventName: "identity", listener: EventListener<IdentityEvent>): void;
+	addEventListener(eventName: "storage", listener: EventListener<StorageEvent>): void;
+	addEventListener(eventName: "capabilities", listener: EventListener<CapabilitiesEvent>): void;
+	addEventListener(eventName: "availability", listener: EventListener<AvailabilityEvent>): void;
+	addEventListener(eventName: "occupancyCreated", listener: EventListener<OccupancyChangedEvent>): void;
+	addEventListener(eventName: "occupancyUpdated", listener: EventListener<OccupancyChangedEvent>): void;
+	addEventListener(eventName: "occupancyAccessChanged", listener: EventListener<OccupancyChangedEvent>): void;
+	addEventListener(eventName: "occupancyEnded", listener: EventListener<OccupancyEndedEvent>): void;
 
 	/**
 	 * Removes an event listener.
@@ -198,6 +358,15 @@ export interface Cube {
 	removeEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
 	removeEventListener(eventName: "compartments", listener: EventListener<CompartmentsEvent>): void;
 	removeEventListener(eventName: "devices", listener: EventListener<DevicesEvent>): void;
+	removeEventListener(eventName: "occupancies", listener: EventListener<OccupancyState>): void;
+	removeEventListener(eventName: "identity", listener: EventListener<IdentityEvent>): void;
+	removeEventListener(eventName: "storage", listener: EventListener<StorageEvent>): void;
+	removeEventListener(eventName: "capabilities", listener: EventListener<CapabilitiesEvent>): void;
+	removeEventListener(eventName: "availability", listener: EventListener<AvailabilityEvent>): void;
+	removeEventListener(eventName: "occupancyCreated", listener: EventListener<OccupancyChangedEvent>): void;
+	removeEventListener(eventName: "occupancyUpdated", listener: EventListener<OccupancyChangedEvent>): void;
+	removeEventListener(eventName: "occupancyAccessChanged", listener: EventListener<OccupancyChangedEvent>): void;
+	removeEventListener(eventName: "occupancyEnded", listener: EventListener<OccupancyEndedEvent>): void;
 
 	/**
 	 * Open the locks with the specified id.

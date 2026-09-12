@@ -21,6 +21,12 @@ npm run dev
 # Run tests
 npm run test
 
+# Type-check packages, demo and tests
+npm run typecheck
+
+# Opt-in real-controller acceptance (see test/README.md)
+npm run test:controller
+
 # Format code with dprint
 npx dprint fmt
 
@@ -70,7 +76,11 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 - `Compartment`: Describes a locker compartment with lock assignments
 - `Device`: Hardware devices (BarcodeReader, Keypad, NfcReader, etc.)
 - `LockStatus`: "OPEN" | "CLOSED" | "BREAKIN" | "BLOCKED"
-- Events: `code`, `lock`, `open`, `close`, `compartments`, `devices`
+- Events: hardware events plus `identity`, `capabilities`, `availability`, `occupancies`, lifecycle events, and `storage`
+- `cube.occupancies`: controller-owned reservation/confirmation/cancellation/update/access/end lifecycle and snapshots
+- `cube.storage`: Center-write-only JSON/blob reads and key invalidations; memory caches only
+- `cube.identity` / `getToken()`: controller-issued installed-app credentials; no separate app message/property
+- Availability: `loading`, `ready`, `unavailable`, `error`; unknown data is never represented as loaded-empty
 
 ## Code Style
 
@@ -88,7 +98,38 @@ This project follows Variocube coding standards.
 
 ## Testing
 
-Currently no unit tests are configured. The test script is a placeholder.
+`npm test` runs Vitest SDK, relay/runtime, and React component tests. `npm run typecheck` checks source and tests
+against workspace source aliases. CI runs both alongside the normal package builds.
+
+`test/fixtures/controller-wire.json` is the byte-identical controller wire fixture (provenance in its README).
+Do not format this shared fixture independently. `test/real-controller.test.ts` is opt-in and exercises the real
+controller memory-mode harness and Center VCMP write path; see `test/README.md` for startup instructions.
+
+Keep extension requests controller-only: `/mock` has no occupancy/storage authority or signed identity. Raw VCMP
+debug logging exposes bearer tokens and must stay disabled even at verbose service log levels. Mock scans can feed
+UI tests; a real door cycle must reach controller `/test/locks`, not just the service mock.
+
+## Extension contract and recovery
+
+Exactly one installed Center app is resolved by the controller; requests cannot select `appId` or token audience.
+Use the actual controller `api/app` message classes: occupancy states are `pending`, `confirmed`, `ended`,
+confirmation upserts via `occupancyCreated`, and cancellation removes pending reservations via `occupancyEnded`.
+Preserve full nullable occupancy fields and content. The service caches snapshots in memory and relays typed ACK
+results/NAKs with correlation. Storage JSON null is distinct from `NOT_FOUND`.
+
+On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
+Capabilities time out after 5 seconds (late receipt upgrades support); commands time out after 10 seconds.
+Lost mutation replies are `COMMAND_OUTCOME_UNKNOWN`; never replay allocate/open/end automatically. Reconcile UUIDs
+or handover references with fresh controller reads. The landed controller explicitly relaxes the original issues'
+global snapshot/event ordering guarantee; preserve received order without promising global commit order.
+
+`getToken()` caches only above 300 seconds remaining, shares concurrent refreshes, and clears credentials on
+generation changes. Controller renewals arrive via `cube`; `expiresAt` is epoch seconds. Read a token immediately
+before fetch/OpenAPI calls, never persist or log it. Business state remains in the controller, not browser storage.
+
+React hooks share `CubeProvider`: `useOccupancies`, `useOccupancy`, `useStorageItem`, `useStorageValue`,
+`useCubeIdentity`. Storage has an additional `not-found` result; value-only reads cannot establish business absence.
+Subscriptions and caches belong to the provider/SDK lifecycle and must discard late asynchronous results.
 
 ## Publishing
 

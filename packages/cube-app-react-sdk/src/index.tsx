@@ -1,26 +1,30 @@
 import {
+	AvailabilityState,
 	CodeEvent,
 	Compartment,
 	CompartmentsEvent,
 	connect,
 	ConnectOptions,
 	Cube,
+	CubeError,
+	CubeIdentity,
 	Device,
 	DevicesEvent,
 	EventListener,
 	LockEvent,
 	LockStatus,
+	Occupancy,
+	OccupancyState,
 } from "@variocube/cube-app-sdk";
 import React, {createContext, PropsWithChildren, useContext, useEffect, useMemo, useState} from "react";
 
 // Re-export the SDK's types via `export type *` so runtime values like `connect` are NOT
 // re-exported — React SDK consumers should use CubeProvider instead of connecting directly.
-// The two runtime values that are genuinely useful (the `Symbology` enum and
-// `validateCodeReaderConfig`) are re-exported explicitly below.
+// Runtime error handling and reader configuration helpers are re-exported explicitly below.
 // `dprint-ignore` because dprint 0.77.0 wrongly strips the `type` from `export type *`.
 // dprint-ignore
 export type * from "@variocube/cube-app-sdk";
-export { Symbology, validateCodeReaderConfig } from "@variocube/cube-app-sdk";
+export { CubeError, Symbology, validateCodeReaderConfig } from "@variocube/cube-app-sdk";
 
 export type Locks = Record<string, LockStatus>;
 
@@ -44,6 +48,12 @@ const CubeContext = createContext<CubeContextContent>({
  * @param props The properties
  */
 export function CubeProvider(props: PropsWithChildren<ConnectOptions>) {
+	// A changed endpoint owns a new connection and subtree. Never render the old cube's
+	// identity or business data while the replacement connection is being established.
+	return <CubeConnection key={JSON.stringify([props.host, props.port, props.secondary])} {...props} />;
+}
+
+function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 	const {
 		children,
 		host,
@@ -70,6 +80,10 @@ export function CubeProvider(props: PropsWithChildren<ConnectOptions>) {
 		cube.addEventListener("compartments", compartments);
 		cube.addEventListener("devices", devices);
 		cube.addEventListener("lock", lock);
+		setConnected(cube.connected);
+		setCompartments(cube.compartments);
+		setDevices(cube.devices);
+		setLocks({});
 		setCube(cube);
 
 		return () => {
@@ -180,5 +194,137 @@ export function useLockEvent(listener: EventListener<LockEvent>) {
 	useEffect(() => {
 		cube.addEventListener("lock", listener);
 		return () => cube.removeEventListener("lock", listener);
-	});
+	}, [cube, listener]);
+}
+
+/** A JSON document read. JSON null is ready; a missing or deleted document is not-found. */
+export type StorageItemResult<T> =
+	| { status: "ready"; data: T; error?: undefined }
+	| { status: "loading" | "unavailable" | "error" | "not-found"; data?: undefined; error?: CubeError };
+
+/** A selected occupancy is absent only when status is ready and data is undefined. */
+export interface OccupancyResult extends AvailabilityState {
+	data?: Occupancy;
+}
+
+type Subscription = (cube: Cube, listener: () => void) => () => void;
+
+function useCubeSnapshot<T>(read: (cube: Cube) => T, subscribe: Subscription): T {
+	const cube = useCube();
+	const [snapshot, setSnapshot] = useState(() => ({cube, value: read(cube)}));
+	useEffect(() => {
+		const update = () => setSnapshot({cube, value: read(cube)});
+		const unsubscribe = subscribe(cube, update);
+		// Subscribe first, then read: an event between render and effect must not be lost.
+		update();
+		return unsubscribe;
+	}, [cube, read, subscribe]);
+	return snapshot.cube === cube ? snapshot.value : read(cube);
+}
+
+const readOccupancies = (cube: Cube) => cube.occupancies.state;
+const subscribeOccupancies: Subscription = (cube, listener) => {
+	cube.addEventListener("occupancies", listener);
+	cube.addEventListener("availability", listener);
+	cube.addEventListener("identity", listener);
+	return () => {
+		cube.removeEventListener("occupancies", listener);
+		cube.removeEventListener("availability", listener);
+		cube.removeEventListener("identity", listener);
+	};
+};
+
+/** The controller's live, authoritative occupancy snapshot and its availability. */
+export function useOccupancies(): OccupancyState {
+	return useCubeSnapshot(readOccupancies, subscribeOccupancies);
+}
+
+/** Select an occupancy without retaining a previous UUID's result. */
+export function useOccupancy(uuid: string): OccupancyResult {
+	const state = useOccupancies();
+	return useMemo(() => ({
+		status: state.status,
+		error: state.error,
+		data: state.status === "ready" ? state.data?.find(occupancy => occupancy.uuid === uuid) : undefined,
+	}), [state, uuid]);
+}
+
+const readIdentity = (cube: Cube) => cube.identity;
+const subscribeIdentity: Subscription = (cube, listener) => {
+	cube.addEventListener("identity", listener);
+	return () => cube.removeEventListener("identity", listener);
+};
+
+/** Current cube/app identity, including renewals; undefined while disconnected. */
+export function useCubeIdentity(): CubeIdentity | undefined {
+	return useCubeSnapshot(readIdentity, subscribeIdentity);
+}
+
+function initialStorageResult<T>(cube: Cube): StorageItemResult<T> {
+	const {status, error} = cube.storage.state;
+	return {status: status === "ready" ? "loading" : status, error};
+}
+
+/** Read JSON initially and after invalidation, reconnect, or a change of installed app. */
+export function useStorageItem<T>(key: string): StorageItemResult<T> {
+	const cube = useCube();
+	const [snapshot, setSnapshot] = useState(() => ({cube, key, result: initialStorageResult<T>(cube)}));
+	useEffect(() => {
+		let active = true;
+		let generation = 0;
+		let availability = cube.storage.state;
+		let identity = cube.identity;
+		const publish = (result: StorageItemResult<T>) => setSnapshot({cube, key, result});
+		const refresh = () => {
+			const requestGeneration = ++generation;
+			availability = cube.storage.state;
+			identity = cube.identity;
+			publish(initialStorageResult<T>(cube));
+			if (availability.status !== "ready") return;
+			void cube.storage.get<T>(key).then(data => {
+				if (active && requestGeneration === generation) publish({status: "ready", data});
+			}, cause => {
+				if (!active || requestGeneration !== generation) return;
+				const error = cause instanceof CubeError ? cause : new CubeError("INTERNAL_ERROR", String(cause));
+				const status = error.code === "NOT_FOUND"
+					? "not-found"
+					: ["DISCONNECTED", "UNSUPPORTED", "APP_NOT_CONFIGURED"].includes(error.code)
+					? "unavailable"
+					: "error";
+				publish({status, error});
+			});
+		};
+		const storageChanged = ({key: changedKey}: { key: string }) => {
+			if (changedKey === key) refresh();
+		};
+		const availabilityChanged = () => {
+			if (availability !== cube.storage.state) refresh();
+		};
+		const identityChanged = () => {
+			const next = cube.identity;
+			if (identity?.cubeId !== next?.cubeId || identity?.appId !== next?.appId) refresh();
+		};
+		cube.addEventListener("storage", storageChanged);
+		cube.addEventListener("availability", availabilityChanged);
+		cube.addEventListener("identity", identityChanged);
+		cube.addEventListener("open", refresh);
+		cube.addEventListener("close", refresh);
+		refresh();
+		return () => {
+			active = false;
+			generation++;
+			cube.removeEventListener("storage", storageChanged);
+			cube.removeEventListener("availability", availabilityChanged);
+			cube.removeEventListener("identity", identityChanged);
+			cube.removeEventListener("open", refresh);
+			cube.removeEventListener("close", refresh);
+		};
+	}, [cube, key]);
+	return snapshot.cube === cube && snapshot.key === key ? snapshot.result : initialStorageResult<T>(cube);
+}
+
+/** Value-only convenience. Use useStorageItem to establish absence for business decisions. */
+export function useStorageValue<T>(key: string): T | undefined {
+	const result = useStorageItem<T>(key);
+	return result.status === "ready" ? result.data : undefined;
 }

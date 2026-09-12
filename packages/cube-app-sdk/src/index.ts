@@ -1,4 +1,6 @@
 export * from "./connect.js";
+export { CubeError } from "./errors.js";
+export type { CubeErrorCode } from "./errors.js";
 // `./messages` and `./types` are type-only modules. Use `export type *` so nothing is emitted
 // to JS: a plain `export *` is emitted verbatim (with an extensionless specifier that Node's
 // ESM loader cannot resolve). `dprint-ignore` because dprint 0.77.0 strips the `type` keyword.

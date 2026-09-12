@@ -26,20 +26,25 @@ import {
 	TableContainer,
 	TableHead,
 	TableRow,
+	TextField,
 	Typography,
 } from "@mui/material";
 import {
+	CubeError,
 	CubeProvider,
 	useCodeEvent,
 	useCompartments,
 	useConnected,
 	useCube,
+	useCubeIdentity,
 	useDevices,
 	useLockEvent,
 	useLocks,
+	useOccupancies,
+	useStorageItem,
 } from "@variocube/cube-app-react-sdk";
-import {CodeEvent, LockEvent} from "@variocube/cube-app-sdk";
-import React, {Fragment, StrictMode, useState} from "react";
+import {CodeEvent, LockEvent, Occupancy} from "@variocube/cube-app-sdk";
+import React, {Fragment, StrictMode, useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 
 createRoot(document.getElementById("root")!).render(
@@ -50,22 +55,44 @@ createRoot(document.getElementById("root")!).render(
 	</StrictMode>,
 );
 
-type Timestamped<T> = T & { timestamp: number };
+type Timestamped<T> = T & { timestamp: number; id: string };
 
 function App() {
-	const [mock, setMock] = useState(true);
+	const [mock, setMock] = useState(false);
+	const [hardwareBusy, setHardwareBusy] = useState(false);
+	const [hardwareError, setHardwareError] = useState<string>();
+	const [hardwareRecovery, setHardwareRecovery] = useState(false);
 
 	const cube = useCube();
 	const connected = useConnected();
+	const hardwareDisabled = !connected || hardwareBusy || hardwareRecovery;
+
+	async function runHardware(operation: () => Promise<void>) {
+		if (hardwareDisabled) return;
+		setHardwareBusy(true);
+		setHardwareError(undefined);
+		try {
+			await operation();
+		}
+		catch (error) {
+			setHardwareError(describeError(error));
+			if (error instanceof CubeError && error.code === "COMMAND_OUTCOME_UNKNOWN") setHardwareRecovery(true);
+		}
+		finally {
+			setHardwareBusy(false);
+		}
+	}
 
 	async function openFirstCompartment() {
-		await cube.openCompartment("1");
+		await runHardware(() => cube.openCompartment("1"));
 	}
 
 	async function openAllCompartments() {
-		for (const compartment of cube.compartments) {
-			await cube.openCompartment(compartment.number);
-		}
+		await runHardware(async () => {
+			for (const compartment of cube.compartments) {
+				await cube.openCompartment(compartment.number);
+			}
+		});
 	}
 
 	return (
@@ -106,55 +133,76 @@ function App() {
 						</Fragment>
 					)}
 				</Alert>
+				<IdentityCard />
+				<OccupancyCard />
+				<StorageCard />
 				<Typography variant="h2">Mock Cube</Typography>
 				<Typography variant="body1">
 					This is a mock cube that is used to test the cube app SDK. It will visually display the status of
 					compartments and you simulate the opening and closing of compartments. Also, you can simulate the
 					scanning of codes.
 				</Typography>
-				<Card sx={{height: 600, display: "flex", flexFlow: "column", justifyContent: "center"}}>
-					{(mock && connected)
-						? (
-							<iframe
-								title="Mock Cube"
-								src="http://localhost:4000/"
-								width="100%"
-								height="100%"
-								style={{border: 0}}
-							/>
-						)
-						: (
-							<Typography variant="body1" color="textSecondary" align="center">
-								The mock cube will be available once the cube app service is started.
-							</Typography>
-						)}
-				</Card>
+				{mock && (
+					<Card sx={{height: 600, display: "flex", flexFlow: "column", justifyContent: "center"}}>
+						{connected
+							? (
+								<iframe
+									title="Mock Cube"
+									src="http://localhost:4000/"
+									width="100%"
+									height="100%"
+									style={{border: 0}}
+								/>
+							)
+							: (
+								<Typography variant="body1" color="textSecondary" align="center">
+									The mock cube will be available once the cube app service is started.
+								</Typography>
+							)}
+					</Card>
+				)}
 				<Box>
 					<FormControlLabel
 						label="Use Mock Cube"
 						control={<Switch checked={mock} onChange={() => setMock(!mock)} />}
 					/>
 					<FormHelperText>
-						You can switch off the mock cube, if you want to run the demo app against a Variocube Locker.
+						Enable the mock for hardware UI testing. Occupancies and storage require a real controller.
 					</FormHelperText>
 				</Box>
 
 				<Typography variant="h2">Actions</Typography>
 				<Typography variant="body1">
-					Here is a list of actions that you can perform on the mock cube.
+					Hardware actions are sent to the connected locker or enabled mock.
 				</Typography>
+				{hardwareError && <Alert severity="warning">{hardwareError}</Alert>}
+				{hardwareRecovery && (
+					<Alert severity="warning">
+						A hardware command has an unknown outcome. Further hardware actions are blocked, including after
+						reconnect or app changes. An operator must inspect the controller and actual door state before
+						starting a new demo session. An occupancy snapshot alone cannot establish whether a lock opened.
+					</Alert>
+				)}
 
 				<Stack spacing={2} direction="row">
-					<Button variant="outlined" disabled={!connected} onClick={() => cube.restartOperatingSystem()}>
+					<Button
+						variant="outlined"
+						disabled={hardwareDisabled}
+						onClick={() => runHardware(() => cube.restartOperatingSystem())}
+					>
 						Restart Operating System
 					</Button>
-					<Button variant="outlined" disabled={!connected} onClick={() => cube.restartUserInterface()}>
+					<Button
+						variant="outlined"
+						disabled={hardwareDisabled}
+						onClick={() => runHardware(() => cube.restartUserInterface())}
+					>
 						Restart User Interface
 					</Button>
-					<Button variant="outlined" disabled={!connected} onClick={openFirstCompartment}>
+					<Button variant="outlined" disabled={hardwareDisabled} onClick={openFirstCompartment}>
 						Open First Compartment
 					</Button>
-					<Button variant="outlined" disabled={!connected} onClick={openAllCompartments}>
+					<Button variant="outlined" disabled={hardwareDisabled} onClick={openAllCompartments}>
 						Open All Compartments
 					</Button>
 				</Stack>
@@ -163,7 +211,10 @@ function App() {
 				<Typography variant="body1">
 					These are the compartments of the cube.
 				</Typography>
-				<CompartmentListCard />
+				<CompartmentListCard
+					disabled={hardwareDisabled}
+					onOpen={lock => runHardware(() => cube.openLock(lock))}
+				/>
 
 				<Typography variant="h2">Devices</Typography>
 				<Typography variant="body1">
@@ -190,10 +241,267 @@ function App() {
 	);
 }
 
-function CompartmentListCard() {
+function IdentityCard() {
+	const identity = useCubeIdentity();
+	return (
+		<Paper sx={{p: 3}}>
+			<Typography variant="h2">Controller identity</Typography>
+			{identity
+				? (
+					<Stack spacing={1}>
+						<Typography>Cube: {identity.cubeId}</Typography>
+						<Typography>Installed app: {identity.appId ?? "No single installed app"}</Typography>
+						<Typography>
+							Token expires:{" "}
+							{identity.expiresAt ? new Date(identity.expiresAt * 1000).toLocaleString() : "Unavailable"}
+						</Typography>
+					</Stack>
+				)
+				: <Typography>Waiting for the controller identity.</Typography>}
+		</Paper>
+	);
+}
+
+interface Recovery {
+	operation: "allocate" | "confirm" | "cancel" | "end";
+	reference: string;
+	uuid?: string;
+	cubeId?: string;
+	appId?: string | null;
+}
+
+function describeError(error: unknown): string {
+	return error instanceof CubeError
+		? `${error.code}: ${error.message}`
+		: error instanceof Error
+		? error.message
+		: String(error);
+}
+
+function OccupancyCard() {
+	const cube = useCube();
+	const identity = useCubeIdentity();
+	const occupancies = useOccupancies();
+	const [boxNumber, setBoxNumber] = useState("1");
+	const [busy, setBusy] = useState(false);
+	const [message, setMessage] = useState<string>();
+	const [recovery, setRecovery] = useState<Recovery>();
+	const disabled = busy || !!recovery || occupancies.status !== "ready";
+
+	async function mutate(operation: Recovery["operation"], occupancy?: Occupancy) {
+		const attempt: Recovery = {
+			operation,
+			reference: crypto.randomUUID(),
+			uuid: occupancy?.uuid,
+			cubeId: identity?.cubeId,
+			appId: identity?.appId,
+		};
+		setBusy(true);
+		setMessage(undefined);
+		try {
+			if (operation === "allocate") {
+				const created = await cube.occupancies.occupyBox({
+					boxNumber,
+					content: {demoReference: attempt.reference},
+				});
+				setMessage(`Reserved occupancy ${created.uuid}.`);
+			}
+			else if (occupancy) {
+				await cube.occupancies[operation](occupancy.uuid);
+			}
+		}
+		catch (error) {
+			setMessage(describeError(error));
+			if (error instanceof CubeError && error.code === "COMMAND_OUTCOME_UNKNOWN") setRecovery(attempt);
+		}
+		finally {
+			setBusy(false);
+		}
+	}
+
+	async function reconcile() {
+		if (!recovery) return;
+		if (identity?.cubeId !== recovery.cubeId || identity?.appId !== recovery.appId) {
+			setMessage("Reconnect the original cube and app before reconciling this operation.");
+			return;
+		}
+		setBusy(true);
+		try {
+			const current = await cube.occupancies.list();
+			const match = current.find(item =>
+				recovery.uuid
+					? item.uuid === recovery.uuid
+					: item.content?.demoReference === recovery.reference
+			);
+			const resolved = recovery.operation === "allocate"
+				? !!match
+				: recovery.operation === "confirm"
+				? match?.state === "confirmed"
+				: !match || match.state === "ended";
+			if (resolved) {
+				setRecovery(undefined);
+				setMessage(
+					match
+						? `Reconciled occupancy ${match.uuid}: ${match.state}.`
+						: "The occupancy is no longer active.",
+				);
+			}
+			else {
+				setMessage(
+					"The refreshed snapshot cannot resolve this operation. Keep this reference for operator reconciliation; allocation remains blocked.",
+				);
+			}
+		}
+		catch (error) {
+			setMessage(describeError(error));
+		}
+		finally {
+			setBusy(false);
+		}
+	}
+
+	return (
+		<Paper sx={{p: 3}}>
+			<Stack spacing={2}>
+				<Typography variant="h2">Occupancies</Typography>
+				<Typography>
+					Connect the service to a real controller, including its memory mode, with exactly one installed app.
+					Reservations and storage are held by that controller.
+				</Typography>
+				{occupancies.status !== "ready" && (
+					<Alert severity={occupancies.status === "error" ? "error" : "info"}>
+						Occupancies: {occupancies.status}. {occupancies.error?.message}
+					</Alert>
+				)}
+				{message && <Alert severity={recovery ? "warning" : "info"}>{message}</Alert>}
+				{recovery && (
+					<Alert
+						severity="warning"
+						action={<Button disabled={busy} onClick={reconcile}>Refresh and reconcile</Button>}
+					>
+						The {recovery.operation} outcome is unknown. Reference:{" "}
+						{recovery.uuid ?? recovery.reference}. Mutations stay blocked until the authoritative snapshot
+						resolves the operation.
+					</Alert>
+				)}
+				<Stack direction="row" spacing={2}>
+					<TextField
+						label="Box number"
+						value={boxNumber}
+						onChange={event => setBoxNumber(event.target.value)}
+					/>
+					<Button variant="contained" disabled={disabled || !boxNumber} onClick={() => mutate("allocate")}>
+						Reserve box
+					</Button>
+				</Stack>
+				{occupancies.status === "ready" && occupancies.data?.length === 0 && (
+					<Typography>No occupancies.</Typography>
+				)}
+				{occupancies.data?.map(occupancy => (
+					<Stack key={occupancy.uuid} direction="row" spacing={1} alignItems="center">
+						<Typography sx={{flex: 1}}>
+							Box {occupancy.boxNumber}: {occupancy.state} ({occupancy.uuid})
+						</Typography>
+						<Button
+							disabled={disabled || occupancy.state !== "pending"}
+							onClick={() =>
+								mutate("confirm", occupancy)}
+						>
+							Confirm
+						</Button>
+						<Button
+							disabled={disabled || occupancy.state !== "pending"}
+							onClick={() =>
+								mutate("cancel", occupancy)}
+						>
+							Cancel reservation
+						</Button>
+						<Button
+							disabled={disabled || occupancy.state !== "confirmed"}
+							onClick={() =>
+								mutate("end", occupancy)}
+						>
+							End
+						</Button>
+					</Stack>
+				))}
+			</Stack>
+		</Paper>
+	);
+}
+
+function StorageCard() {
+	const [key, setKey] = useState("planned-handovers");
+	const item = useStorageItem<unknown>(key);
+	return (
+		<Paper sx={{p: 3}}>
+			<Stack spacing={2}>
+				<Typography variant="h2">Controller storage</Typography>
+				<Typography>
+					Documents are written by the Center and remain readable from the controller while offline.
+				</Typography>
+				<TextField label="Document key" value={key} onChange={event => setKey(event.target.value)} />
+				<Typography>JSON read: {item.status}</Typography>
+				{item.error && (
+					<Alert severity={item.status === "not-found" ? "info" : "warning"}>
+						{describeError(item.error)}
+					</Alert>
+				)}
+				{item.status === "ready" && (
+					<Box component="pre" sx={{overflow: "auto"}}>{JSON.stringify(item.data, null, 2)}</Box>
+				)}
+				<StorageBlobPreview documentKey={key} />
+			</Stack>
+		</Paper>
+	);
+}
+
+function StorageBlobPreview({documentKey}: { documentKey: string }) {
+	const cube = useCube();
+	const identity = useCubeIdentity();
+	const generation = useRef(0);
+	const [details, setDetails] = useState<string>();
+	useEffect(() => {
+		const clear = () => {
+			generation.current++;
+			setDetails(undefined);
+		};
+		const changed = ({key}: { key: string }) => {
+			if (key === documentKey) clear();
+		};
+		cube.addEventListener("storage", changed);
+		cube.addEventListener("availability", clear);
+		clear();
+		return () => {
+			generation.current++;
+			cube.removeEventListener("storage", changed);
+			cube.removeEventListener("availability", clear);
+		};
+	}, [cube, documentKey, identity?.cubeId, identity?.appId]);
+	async function readBlob() {
+		const current = ++generation.current;
+		setDetails("Loading binary representation…");
+		try {
+			const blob = await cube.storage.getBlob(documentKey);
+			if (current === generation.current) {
+				setDetails(`${blob.type || "Unknown content type"}, ${blob.size} bytes`);
+			}
+		}
+		catch (error) {
+			if (current === generation.current) setDetails(describeError(error));
+		}
+	}
+	return (
+		<Stack direction="row" spacing={2} alignItems="center">
+			<Button onClick={readBlob} disabled={cube.storage.state.status !== "ready"}>Read as blob</Button>
+			{details && <Typography>{details}</Typography>}
+		</Stack>
+	);
+}
+
+function CompartmentListCard({disabled, onOpen}: { disabled: boolean; onOpen: (lock: string) => Promise<void> }) {
 	const compartments = useCompartments();
 	const locks = useLocks();
-	const cube = useCube();
 
 	return (
 		<Paper>
@@ -220,8 +528,8 @@ function CompartmentListCard() {
 									{compartment.lock}
 									{compartment.lock && <Chip label={locks[compartment.lock]} />}
 									<Button
-										disabled={!compartment.lock}
-										onClick={() => compartment.lock && cube.openLock(compartment.lock)}
+										disabled={disabled || !compartment.lock}
+										onClick={() => compartment.lock && onOpen(compartment.lock)}
 									>
 										Open
 									</Button>
@@ -230,9 +538,8 @@ function CompartmentListCard() {
 									{compartment.secondaryLock}
 									{compartment.secondaryLock && <Chip label={locks[compartment.secondaryLock]} />}
 									<Button
-										disabled={!compartment.secondaryLock}
-										onClick={() =>
-											compartment.secondaryLock && cube.openLock(compartment.secondaryLock)}
+										disabled={disabled || !compartment.secondaryLock}
+										onClick={() => compartment.secondaryLock && onOpen(compartment.secondaryLock)}
 									>
 										Open
 									</Button>
@@ -253,7 +560,7 @@ function DeviceListCard() {
 		<Paper>
 			<List>
 				{devices.map(device => (
-					<ListItem>
+					<ListItem key={device.id}>
 						<ListItemIcon>
 							<Avatar>🖥</Avatar>
 						</ListItemIcon>
@@ -271,7 +578,11 @@ function DeviceListCard() {
 function LockEventCard() {
 	const [lockEvents, setLockEvents] = useState<Timestamped<LockEvent>[]>([]);
 
-	useLockEvent(lockEvent => setLockEvents(events => [{timestamp: Date.now(), ...lockEvent}, ...events].slice(0, 10)));
+	useLockEvent(lockEvent =>
+		setLockEvents(events =>
+			[{id: crypto.randomUUID(), timestamp: Date.now(), ...lockEvent}, ...events].slice(0, 10)
+		)
+	);
 
 	return (
 		<Card>
@@ -281,7 +592,7 @@ function LockEventCard() {
 			/>
 			<List>
 				{lockEvents.map(event => (
-					<ListItem>
+					<ListItem key={event.id}>
 						<ListItemIcon>
 							<Avatar>{event.compartmentNumber}</Avatar>
 						</ListItemIcon>
@@ -299,7 +610,11 @@ function LockEventCard() {
 function CodeEventCard() {
 	const [codeEvents, setCodeEvents] = useState<Timestamped<CodeEvent>[]>([]);
 
-	useCodeEvent(codeEvent => setCodeEvents(events => [{timestamp: Date.now(), ...codeEvent}, ...events].slice(0, 10)));
+	useCodeEvent(codeEvent =>
+		setCodeEvents(events =>
+			[{id: crypto.randomUUID(), timestamp: Date.now(), ...codeEvent}, ...events].slice(0, 10)
+		)
+	);
 
 	return (
 		<Card>
@@ -309,7 +624,7 @@ function CodeEventCard() {
 			/>
 			<List>
 				{codeEvents.map(event => (
-					<ListItem>
+					<ListItem key={event.id}>
 						<ListItemIcon>
 							<Avatar>🔑</Avatar>
 						</ListItemIcon>

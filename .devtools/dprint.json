@@ -17,6 +17,7 @@
   "includes": ["**/*.{ts,tsx,js,jsx,cjs,mjs,json,md}"],
   "excludes": [
     "**/node_modules",
+    "test/fixtures/controller-wire.json",
     "**/*-lock.json",
     "**/build",
     "**/dist",
