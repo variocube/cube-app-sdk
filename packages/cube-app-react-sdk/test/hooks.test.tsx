@@ -2,6 +2,7 @@
 import {
 	AvailabilityState,
 	connect,
+	ControllerSession,
 	Cube,
 	CubeError,
 	CubeIdentity,
@@ -114,10 +115,22 @@ beforeEach(() => {
 afterEach(async () => {
 	await act(async () => root.unmount());
 	container.remove();
+	for (const session of sessions.values()) session.close();
+	sessions.clear();
 });
 
+const sessions = new Map<string, ControllerSession>();
 async function render(children: React.ReactNode, host = "first") {
-	await act(async () => root.render(<CubeProvider host={host}>{children}</CubeProvider>));
+	let session = sessions.get(host);
+	if (!session) {
+		session = new ControllerSession(`https://${host}.example`, fetch, {
+			credential: "test-credential-12345",
+			expiresAt: Math.floor(Date.now() / 1000) + 600,
+			generation: 1,
+		});
+		sessions.set(host, session);
+	}
+	await act(async () => root.render(<CubeProvider session={session}>{children}</CubeProvider>));
 }
 
 function StorageProbe({documentKey}: { documentKey: string }) {

@@ -1,11 +1,6 @@
-import type {
-	AvailabilityMessage,
-	CapabilitiesMessage,
-	CubeMessage,
-	OccupanciesMessage,
-	Occupancy,
-} from "@variocube/cube-app-sdk";
+import type {AvailabilityMessage, CubeMessage, OccupanciesMessage, Occupancy} from "@variocube/cube-app-sdk";
 import {VcmpError, type VcmpMessage} from "@variocube/vcmp";
+import type {CapabilitiesMessage} from "./legacy";
 
 type Feature = "occupancies" | "storage" | "identity";
 

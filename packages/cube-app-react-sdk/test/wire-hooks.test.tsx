@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {connect, Occupancy} from "@variocube/cube-app-sdk";
+import {connect, ControllerSession, Occupancy} from "@variocube/cube-app-sdk";
 import React, {act} from "react";
 import {createRoot} from "react-dom/client";
 import {expect, it, vi} from "vitest";
@@ -32,7 +32,7 @@ vi.mock("@variocube/vcmp", () => ({
 		start() {}
 		stop() {
 			wire.connected = false;
-			wire.onClose();
+			wire.onClose?.();
 		}
 		send = wire.send;
 	},
@@ -45,7 +45,13 @@ vi.mock("@variocube/cube-app-sdk", async importOriginal => ({
 
 it("renders controller lifecycle events through the real SDK cache, including cancellation", async () => {
 	(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-	const cube = new CubeImpl({host: "test", port: 4000, secondary: false});
+	const session = new ControllerSession("http://localhost:9000", fetch, {
+		credential: "test-credential-12345",
+		expiresAt: Math.floor(Date.now() / 1000) + 600,
+		generation: 1,
+	});
+	wire.send.mockResolvedValue({protocolMajor: 6, generation: 1});
+	const cube = new CubeImpl({session});
 	vi.mocked(connect).mockReturnValue(cube);
 	const container = document.createElement("div");
 	const root = createRoot(container);
@@ -55,8 +61,9 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 		return <output>{JSON.stringify({all, item})}</output>;
 	}
 	const read = () => JSON.parse(container.textContent ?? "null");
+	let revision = 0;
 	const emit = (event: { "@type": string; [key: string]: unknown }) =>
-		wire.handlers.get(event["@type"])?.(event, {isOpen: true});
+		wire.handlers.get(event["@type"])?.({generation: 1, revision: ++revision, ...event}, {isOpen: true});
 	const pending: Occupancy = {
 		uuid: "reservation",
 		appId: "app-a",
@@ -72,18 +79,25 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 	try {
 		await act(async () =>
 			root.render(
-				<CubeProvider>
+				<CubeProvider session={session}>
 					<Probe />
 				</CubeProvider>,
 			)
 		);
 		await act(async () => {
 			wire.onOpen();
-			emit(fixtures.capabilities);
-			emit({"@type": "cube", cubeId: "cube-1", appId: "app-a", token: null, expiresAt: null});
 		});
 		expect(read().all.status).toBe("loading");
-		await act(async () => emit({"@type": "occupancies", occupancies: [pending]}));
+		await act(async () =>
+			emit({
+				"@type": "initialState",
+				identity: {cubeId: "cube-1", appId: "app-a", token: null, expiresAt: null},
+				compartments: [],
+				devices: [],
+				occupancies: [pending],
+				storageReady: true,
+			})
+		);
 		expect(read().item.data.state).toBe("pending");
 		const confirmed = {...pending, state: "confirmed"};
 		await act(async () => emit({"@type": "occupancyCreated", occupancy: confirmed}));
@@ -106,6 +120,7 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 		expect(read().all).not.toHaveProperty("data");
 	}
 	finally {
+		session.close();
 		await act(async () => root.unmount());
 	}
 });

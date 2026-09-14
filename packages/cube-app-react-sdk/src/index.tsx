@@ -50,14 +50,18 @@ const CubeContext = createContext<CubeContextContent>({
 export function CubeProvider(props: PropsWithChildren<ConnectOptions>) {
 	// A changed endpoint owns a new connection and subtree. Never render the old cube's
 	// identity or business data while the replacement connection is being established.
-	return <CubeConnection key={JSON.stringify([props.host, props.port, props.secondary])} {...props} />;
+	return (
+		<CubeConnection
+			key={JSON.stringify([props.session.endpoint, props.session.generation, props.secondary])}
+			{...props}
+		/>
+	);
 }
 
 function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 	const {
 		children,
-		host,
-		port,
+		session,
 		secondary,
 	} = props;
 
@@ -74,7 +78,7 @@ function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 		const compartments = ({compartments}: CompartmentsEvent) => setCompartments(compartments);
 		const devices = ({devices}: DevicesEvent) => setDevices(devices);
 
-		const cube = connect({host, port, secondary});
+		const cube = connect({session, secondary});
 		cube.addEventListener("open", open);
 		cube.addEventListener("close", close);
 		cube.addEventListener("compartments", compartments);
@@ -94,7 +98,7 @@ function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 			cube.removeEventListener("lock", lock);
 			cube.close();
 		};
-	}, [host, port, secondary]);
+	}, [session, secondary]);
 
 	const value = useMemo(() => ({
 		cube,
@@ -288,7 +292,7 @@ export function useStorageItem<T>(key: string): StorageItemResult<T> {
 				const error = cause instanceof CubeError ? cause : new CubeError("INTERNAL_ERROR", String(cause));
 				const status = error.code === "NOT_FOUND"
 					? "not-found"
-					: ["DISCONNECTED", "UNSUPPORTED", "APP_NOT_CONFIGURED"].includes(error.code)
+					: ["DISCONNECTED", "AUTHENTICATION_REQUIRED", "APP_NOT_CONFIGURED"].includes(error.code)
 					? "unavailable"
 					: "error";
 				publish({status, error});
@@ -327,4 +331,15 @@ export function useStorageItem<T>(key: string): StorageItemResult<T> {
 export function useStorageValue<T>(key: string): T | undefined {
 	const result = useStorageItem<T>(key);
 	return result.status === "ready" ? result.data : undefined;
+}
+
+const readConnection = (cube: Cube) => cube.state;
+const subscribeConnection: Subscription = (cube, listener) => {
+	cube.addEventListener("state", listener);
+	return () => cube.removeEventListener("state", listener);
+};
+
+/** Authentication and initial snapshot readiness, distinct from socket connectivity. */
+export function useConnectionState() {
+	return useCubeSnapshot(readConnection, subscribeConnection);
 }

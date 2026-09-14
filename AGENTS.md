@@ -76,7 +76,7 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 - `Compartment`: Describes a locker compartment with lock assignments
 - `Device`: Hardware devices (BarcodeReader, Keypad, NfcReader, etc.)
 - `LockStatus`: "OPEN" | "CLOSED" | "BREAKIN" | "BLOCKED"
-- Events: hardware events plus `identity`, `capabilities`, `availability`, `occupancies`, lifecycle events, and `storage`
+- Events: hardware events plus `identity`, `state`, `availability`, `occupancies`, lifecycle events, and `storage`
 - `cube.occupancies`: controller-owned reservation/confirmation/cancellation/update/access/end lifecycle and snapshots
 - `cube.storage`: Center-write-only JSON/blob reads and key invalidations; memory caches only
 - `cube.identity` / `getToken()`: controller-issued installed-app credentials; no separate app message/property
@@ -103,7 +103,7 @@ against workspace source aliases. CI runs both alongside the normal package buil
 
 `test/fixtures/controller-wire.json` is the byte-identical controller wire fixture (provenance in its README).
 Do not format this shared fixture independently. `test/real-controller.test.ts` is opt-in and exercises the real
-controller memory-mode harness and Center VCMP write path; see `test/README.md` for startup instructions.
+native Rust development fixture through its trusted Unix launcher; see `test/README.md` for startup instructions.
 
 Keep extension requests controller-only: `/mock` has no occupancy/storage authority or signed identity. Raw VCMP
 debug logging exposes bearer tokens and must stay disabled even at verbose service log levels. Mock scans can feed
@@ -118,10 +118,9 @@ Preserve full nullable occupancy fields and content. The service caches snapshot
 results/NAKs with correlation. Storage JSON null is distinct from `NOT_FOUND`.
 
 On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
-Capabilities time out after 5 seconds (late receipt upgrades support); commands time out after 10 seconds.
+Controller 6 has no capability discovery. Authentication/initial-state and commands have 10-second deadlines.
 Lost mutation replies are `COMMAND_OUTCOME_UNKNOWN`; never replay allocate/open/end automatically. Reconcile UUIDs
-or handover references with fresh controller reads. The landed controller explicitly relaxes the original issues'
-global snapshot/event ordering guarantee; preserve received order without promising global commit order.
+or handover references with fresh controller reads. Controller 6 provides contiguous per-session publication revisions; these do not promise global equality across sessions.
 
 `getToken()` caches only above 300 seconds remaining, shares concurrent refreshes, and clears credentials on
 generation changes. Controller renewals arrive via `cube`; `expiresAt` is epoch seconds. Read a token immediately
@@ -142,3 +141,11 @@ repo stay at `0.0.0` — the published version comes from the release tag.
    - publishes the public packages to npm (`lerna publish from-package`) under `@variocube`,
    - builds the `cube-app-service` `.deb` and uploads it to the apt repository,
    - deploys the demo to GitHub Pages.
+
+## Rust controller major 6 integration
+
+The new SDK replaces production cube-app-service with direct authenticated `/app`. Read `docs/controller-6.md` for
+wire/provenance and `test/README.md` for native checks. SDK major 2 requires protocol 6. Bootstrap before importing
+router/analytics, never trust URL-selected app/terminal/audience, and never persist or log grants, API credentials or JWTs.
+The Node package is legacy-only; its internal capability contract does not reintroduce negotiation into the new SDK.
+Use `useConnectionState()` for authenticated readiness. Physical kiosk and release acceptance remain separately evidenced.

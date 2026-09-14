@@ -1,5 +1,4 @@
 import type {
-	CapabilitiesMessage,
 	CodeMessage,
 	CompartmentsMessage,
 	CubeMessage,
@@ -15,6 +14,7 @@ import {VcmpServer} from "@variocube/vcmp-server";
 import {createServer} from "http";
 import {WebSocket, WebSocketServer} from "ws";
 import {ControllerRelay, extensionCommands, relayError} from "./controllerRelay";
+import type {CapabilitiesMessage} from "./legacy";
 import {serveMockUi} from "./serveMockUi";
 
 const log = new Logger("cube-app-service");

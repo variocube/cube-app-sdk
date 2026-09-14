@@ -1,7 +1,7 @@
 # Cube App React SDK
 
 `CubeProvider` owns a single SDK connection. Its hooks subscribe to that connection and remove subscriptions on unmount;
-changing `host`, `port`, or `secondary` replaces the connection and its subtree. No browser persistence is used.
+changing the authenticated session, endpoint, generation or `secondary` replaces the connection. No browser persistence is used.
 
 ```tsx
 import {CubeProvider, useOccupancies, useStorageItem, useStorageValue} from "@variocube/cube-app-react-sdk";
@@ -27,9 +27,9 @@ function OccupancyList() {
 	return <ul>{occupancies.data.map(item => <li key={item.uuid}>Box {item.boxNumber}: {item.state}</li>)}</ul>;
 }
 
-function App() {
+function App({session}: { session: import("@variocube/cube-app-sdk").ControllerSession }) {
 	return (
-		<CubeProvider>
+		<CubeProvider session={session}>
 			<Welcome />
 			<PlannedHandovers />
 			<OccupancyList />
@@ -61,7 +61,7 @@ without retaining the previous result. Disconnect and app changes clear both occ
 snapshot arrives.
 
 `useCubeIdentity()` returns `CubeIdentity | undefined`, follows identity and token renewal events, and clears on disconnect.
-An unresolved app produces an identity with null `appId`, `token`, and `expiresAt`. Display cube/app IDs and expiry metadata;
+An unresolved or replaced app invalidates its session and clears identity. Display cube/app IDs and expiry metadata;
 never log or render bearer tokens. Obtain a current token immediately before a backend request:
 
 ```tsx
@@ -91,3 +91,7 @@ the controller and door state and starts a new session; an occupancy snapshot ca
 
 Run component-visible hook tests with `npm test` from the repository root. The React package is versioned and released
 together with core SDK and service through the repository's `release.sh` workflow.
+
+Before loading React or router modules, call the core `bootstrapController()` as described in the [root README](../../README.md).
+`useConnectionState()` distinguishes disconnected/initializing/ready/unavailable/error; socket opening alone is not ready.
+Provider caches and hooks retain no authority across an app generation change. Reload requires a fresh trusted kiosk launch.

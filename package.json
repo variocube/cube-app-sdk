@@ -9,7 +9,8 @@
     "dev": "lerna run dev",
     "test": "vitest run",
     "test:controller": "vitest run --config vitest.controller.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.check.json"
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test:browser": "playwright test"
   },
   "repository": {
     "type": "git",
@@ -26,6 +27,7 @@
     "@emotion/styled": "^11.14.1",
     "@liuli-util/vite-plugin-node": "^0.10.0",
     "@mui/material": "^7.2.0",
+    "@playwright/test": "^1.63.0",
     "@types/node": "20.14.8",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

@@ -1,86 +1,35 @@
-# Tests and the real-controller harness
+# SDK validation
 
-`npm test` runs the SDK, service relay/runtime, and React component tests with Vitest.
-`npm run typecheck` also checks test and demo code against workspace source, without relying on old build output.
-The shared controller fixture is pinned in [fixtures](fixtures/README.md).
+Run `npm ci`, `npm test`, `npm run typecheck`, and `npm run build` from the repository root.
+Core/React tests exercise authenticated readiness, nullable occupancy/storage contracts, generation and revision changes,
+uncertain mutation outcomes, stale cache rejection, bounded requests and renewal failures. Retained Node-service tests
+are SDK 1 compatibility regressions and do not run the new SDK through a Java relay.
 
-## Real controller acceptance
+## Real Chromium
 
-Use a controller checkout containing issue #151's landed implementation and test-only `e2eController` task
-(tested against commit `65975af`). It requires the controller's Java/Gradle toolchain and dependencies.
-Start this isolated memory-mode controller in another terminal:
-
-```sh
-cd ../controller
-./gradlew e2eController --args='--server.port=19000 --controller.center=ws://127.0.0.1:17000/center'
+```shell
+npx playwright install --with-deps chromium
+npm run test:browser
 ```
 
-Then run from this repository:
+The real Chromium suite verifies query/hash restoration before grant exchange, no credential in HTTP URLs/referrers,
+empty local/session storage and clean reload requiring a fresh launch. It uses a controlled HTTP exchange boundary.
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an installed Chromium. Cog physical/VT evidence belongs in the coordinated
+kiosk/controller acceptance record; headless Chromium does not establish it.
 
-```sh
-npm ci
-npm run test:controller
+## Real native controller
+
+Download/build the matching controller 6 candidate and run:
+
+```shell
+controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/sdk-controller
+CONTROLLER_URL=http://localhost:9000 CONTROLLER_KIOSK_SOCKET=/tmp/sdk-controller/kiosk.sock npm run test:controller
 ```
 
-The test opens a loopback Center VCMP fixture on port 17000 and cube-app-service on port 14000. It waits for the
-controller's next Center reconnect (up to 55 seconds), seeds a box and a lock through `/test/fixtures`, then uses
-the core SDK through the service. Ports 14000, 17000 and 19000 must be free before starting the harness.
-Use only this fresh memory-mode test instance: the test replaces installed apps, storage, and occupancies.
+The test obtains `/launch` over the trusted Unix socket, cleans and exchanges the fragment, and connects the actual SDK
+with browser-origin headers. It exercises reserve/confirm/access/update/end, nullable and binary storage, app JWT audience
+and raw unauthorized renewal. Use an isolated fixture instance: the test accepts real domain mutations.
 
-Coverage includes reserve/cancel/confirm/update/access/end, controller lock open/close notifications, JSON/null/
-binary reads, Center-driven deletion, maintenance updates, app A→B, zero/two installed apps, foreign UUID rejection,
-and continued operation with Center disconnected. It checks the real token's ES256 signature against `/identity`,
-cube subject, exact app audience, and expiry. The local Center fixture does not implement backend enrollment,
-tenant authorization, or Logistics authentication; those remain the Center/app-common/Logistics integration tests.
-
-Storage writes enter through actual controller Center listeners using `cube:AppStorageItemChanged` with
-`{appId,key,value:{contentType,data:<base64>}}`; deletion uses `cube:AppStorageItemDeleted {appId,key}`.
-This is a test Center peer, not an SDK write API. No bearer token or authorization header is printed.
-
-## Interactive demo
-
-For the browser demo, start the controller harness on its normal port:
-
-```sh
-cd ../controller
-./gradlew e2eController --args='--server.port=9000'
-```
-
-It binds to loopback, uses memory storage, and resolves `e2e-app` on `e2e-cube`. For an existing Center app ID use
-`--controller.app=<exact-app-id>` and `--controller.cube-id=<cube-id>`. The next real Center installed-app snapshot
-replaces the development override. For storage data, connect to a development Center using the controller's
-normal configuration and write through that Center, or use the isolated automated test above.
-
-Seed the box/lock, then start the service and demo in separate terminals:
-
-```sh
-curl -X POST http://127.0.0.1:9000/test/fixtures -H 'Content-Type: application/json' \
-  -d '[{"number":"1","types":["small"],"lock":"fixture-1"}]'
-npm run dev --workspace=@variocube/cube-app-service
-npm run dev --workspace=@variocube/cube-app-demo
-```
-
-Opening `fixture-1` changes the controller's LockManager state to Open. Feed the subsequent close through the
-controller fixture, then confirm the reservation in the demo:
-
-```sh
-curl -X POST http://127.0.0.1:9000/test/locks -H 'Content-Type: application/json' \
-  -d '{"lock":"fixture-1","status":"Closed"}'
-```
-
-`/mock` scans may drive UI tests. Service-only mock lock events do not demonstrate a controller door cycle.
-The controller fixture endpoints are included only in its test runtime, never its shipped packages.
-
-## Recovery and ordering
-
-Tests exercise lost replies without mutation replay, pending-request rejection, late-result suppression,
-capability negotiation, snapshot replacement and cache clearing. A sent allocation/open/end with no reply has
-an unknown outcome; reconcile by known UUID or handover reference before continuing.
-
-The landed controller explicitly relaxed global commit ordering between snapshots and concurrent notifications.
-These tests establish relay receive order and generation isolation, not an upstream global ordering guarantee.
-Fresh authoritative `list()`/`get()` calls support reconciliation; unresolved allocation remains a recovery state.
-
-Full Logistics payload/cutover/rollback acceptance is owned by `logistics#1674` and `logistics#1675`.
-Core SDK, React SDK, and service are released together via `./release.sh <version>` after merge; the existing
-Debian package and runtime selection remain unchanged.
+Expected fixture: installed `dev-app`, available boxes, `configuration` JSON `{theme:"light"}`, `nullable` JSON null,
+`binary` bytes `[0,1,255]`. Production services, Java, physical drivers and `cube-app-service` are not prerequisites.
+The developer chooses persistent state explicitly; remove/reset only that selected instance when repeating tests.

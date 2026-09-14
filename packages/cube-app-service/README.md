@@ -1,4 +1,16 @@
-# Cube App Service
+# Legacy cube-app-service
+
+This package is retained for SDK 1 / Java-controller compatibility and source provenance. SDK major 2 uses Rust
+controller major 6 directly; do not run this package in the new production or native development workflow.
+The legacy capability relay is isolated inside this package and is not exported by the new SDK.
+
+Use `controller dev --fixture single` and the authenticated launcher described in the [root README](../../README.md).
+The old mock owns no occupancy/storage/identity authority. Existing service tests remain regression evidence for the
+reviewed committed baseline; they do not establish controller 6 acceptance.
+
+The following historical instructions apply only to SDK 1 deployments.
+
+## Cube App Service
 
 The service bridges browser SDK clients on port 4000 to the controller's `/app` VCMP endpoint on port 9000.
 It relays hardware commands plus occupancy, storage-read, maintenance and token requests. Replies retain their

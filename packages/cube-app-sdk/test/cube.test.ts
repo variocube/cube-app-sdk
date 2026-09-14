@@ -2,6 +2,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import fixture from "../../../test/fixtures/controller-wire.json";
 import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
+import {ControllerSession} from "../src/session.js";
 import type {CubeIdentity, Occupancy} from "../src/types.js";
 
 class Socket {
@@ -12,6 +13,7 @@ class Socket {
 	onmessage?: (event: { data: string }) => void;
 	onerror?: () => void;
 	frames: string[] = [];
+	revision = 0;
 	constructor(readonly url: string) {
 		Socket.instances.push(this);
 	}
@@ -27,13 +29,18 @@ class Socket {
 		this.frames.push(frame);
 	}
 	event(message: object) {
-		this.onmessage?.({data: `MSG000000000001${JSON.stringify(message)}`});
+		this.onmessage?.({
+			data: `MSG000000000001${JSON.stringify({generation: 1, revision: ++this.revision, ...message})}`,
+		});
 	}
 	reply(frame: string, value?: unknown, kind = "ACK") {
+		if (kind === "ACK") value = {generation: 1, revision: this.revision, result: value};
 		this.onmessage?.({data: `${kind}${frame.slice(3, 15)}${value === undefined ? "" : JSON.stringify(value)}`});
 	}
 	requests() {
-		return this.frames.filter(frame => frame.startsWith("MSG"));
+		return this.frames.filter(frame =>
+			frame.startsWith("MSG") && JSON.parse(frame.slice(15))["@type"] !== "authenticate"
+		);
 	}
 	request(type: string) {
 		const frames = this.requests().filter(frame => JSON.parse(frame.slice(15))["@type"] === type);
@@ -82,10 +89,29 @@ async function flush() {
 let cube: CubeImpl;
 let socket: Socket;
 
+async function authenticate(protocolMajor = 6) {
+	await flush();
+	const frame = socket.frames.find(frame =>
+		frame.startsWith("MSG") && JSON.parse(frame.slice(15))["@type"] === "authenticate"
+	);
+	if (!frame) throw new Error("Missing authentication frame");
+	socket.onmessage?.({data: `ACK${frame.slice(3, 15)}${JSON.stringify({protocolMajor, generation: 1})}`});
+	await flush();
+}
+
 async function ready(data: Occupancy[] = []) {
-	socket.event(fixture.capabilities);
-	socket.event({"@type": "cube", ...identity()});
-	socket.event({"@type": "occupancies", occupancies: data});
+	await authenticate();
+	socket.event({
+		"@type": "initialState",
+		revision: 0,
+		generation: 1,
+		identity: identity(),
+		compartments: [],
+		devices: [],
+		occupancies: data,
+		storageReady: true,
+	});
+	socket.revision = 0;
 	await flush();
 }
 
@@ -94,7 +120,13 @@ beforeEach(() => {
 	vi.setSystemTime(new Date("2026-09-12T12:00:00Z"));
 	Socket.instances = [];
 	vi.stubGlobal("WebSocket", Socket);
-	cube = new CubeImpl({host: "localhost", port: 4000, secondary: false});
+	cube = new CubeImpl({
+		session: new ControllerSession("http://localhost:9000", fetch, {
+			credential: "test-credential-123456",
+			expiresAt: Math.floor(Date.now() / 1000) + 600,
+			generation: 1,
+		}),
+	});
 	socket = Socket.instances[0];
 	socket.open();
 });
@@ -248,38 +280,23 @@ describe("authoritative state and invalidation", () => {
 		await flush();
 		await readFailure;
 		await mutationFailure;
-		expect(cube.identity?.appId).toBe("app-b");
-		expect(cube.occupancies.state).toEqual({status: "loading"});
+		expect(cube.identity).toBeUndefined();
+		expect(cube.state).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
 		socket.reply(original, fixture.storage[0]);
 		socket.event(fixture.emptySnapshot);
 		await flush();
-		expect(cube.occupancies.state).toEqual({status: "ready", data: []});
-		const next = cube.storage.get("json");
-		expect(socket.request("getStorageItem")).not.toBe(original);
-		socket.reply(socket.request("getStorageItem"), {...fixture.storage[0], content: {app: "b"}});
-		await expect(next).resolves.toEqual({app: "b"});
+		expect(cube.occupancies.snapshot).toBeUndefined();
+		await expect(cube.storage.get("json")).rejects.toMatchObject({code: "DISCONNECTED"});
 	});
 
-	it("keeps null identity unavailable and requests the controller's installed-ID diagnostic", async () => {
+	it("invalidates the old app if the installed app is removed", async () => {
 		await ready();
 		socket.event({"@type": "cube", ...identity(null)});
 		socket.event(fixture.emptySnapshot);
 		await flush();
-		expect(cube.identity).toEqual(identity(null));
-		expect(cube.occupancies.state).toMatchObject({status: "unavailable", error: {code: "APP_NOT_CONFIGURED"}});
+		expect(cube.identity).toBeUndefined();
 		expect(cube.occupancies.snapshot).toBeUndefined();
-		const query = cube.occupancies.list();
-		const failure = expect(query).rejects.toMatchObject({
-			code: "APP_NOT_CONFIGURED",
-			message: "Expected one installed app; installed IDs: [a, b]",
-		});
-		socket.reply(socket.request("getOccupancies"), {
-			title: "App not configured",
-			status: 409,
-			code: "APP_NOT_CONFIGURED",
-			message: "Expected one installed app; installed IDs: [a, b]",
-		}, "NAK");
-		await failure;
+		await expect(cube.occupancies.list()).rejects.toMatchObject({code: "DISCONNECTED"});
 	});
 
 	it("discards storage responses invalidated during the read and shares current reads", async () => {
@@ -332,48 +349,86 @@ describe("authoritative state and invalidation", () => {
 	});
 });
 
-describe("connection, capabilities and unknown outcomes", () => {
-	it("marks an old controller unsupported at 5 seconds, keeps hardware, and accepts late capabilities", async () => {
-		const query = cube.occupancies.list();
-		const unsupported = expect(query).rejects.toMatchObject({code: "UNSUPPORTED"});
+describe("authentication, connection and unknown outcomes", () => {
+	it("sends only authentication before ready and rejects an incompatible protocol", async () => {
+		await expect(cube.openLock("board:1")).rejects.toMatchObject({code: "NOT_READY"});
+		await authenticate(5);
+		expect(cube.state).toMatchObject({status: "error", error: {code: "PROTOCOL_MISMATCH"}});
 		expect(socket.requests()).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(4999);
-		expect(cube.occupancies.state.status).toBe("loading");
-		await vi.advanceTimersByTimeAsync(1);
-		await unsupported;
-		expect(cube.storage.state).toMatchObject({status: "unavailable", error: {code: "UNSUPPORTED"}});
-		const hardware = cube.openLock("board:1");
-		socket.reply(socket.request("openLock"));
-		await hardware;
-		await ready();
-		expect(cube.occupancies.state).toEqual({status: "ready", data: []});
 	});
 
-	it("does not route extension commands to a mock-only service", async () => {
-		socket.event({"@type": "availability", connected: false});
+	it("buffers a bounded initial publication until the authentication ACK succeeds", async () => {
 		await flush();
-		await expect(cube.occupancies.occupyBox({boxNumber: "1"})).rejects.toMatchObject({code: "DISCONNECTED"});
-		await expect(cube.storage.keys()).rejects.toMatchObject({code: "DISCONNECTED"});
-		expect(socket.requests()).toHaveLength(0);
+		socket.event({
+			"@type": "initialState",
+			revision: 0,
+			identity: identity(),
+			compartments: [],
+			devices: [],
+			occupancies: [],
+			storageReady: true,
+		});
+		socket.event({"@type": "occupancyCreated", revision: 1, occupancy: occupancy()});
+		await flush();
+		expect(cube.identity).toBeUndefined();
+		expect(cube.occupancies.snapshot).toBeUndefined();
+		await authenticate();
+		expect(cube.state.status).toBe("ready");
+		expect(cube.occupancies.snapshot).toEqual([occupancy()]);
 	});
 
-	it("times out a sent mutation as unknown without replaying it, and queries as TIMEOUT", async () => {
+	it("drops pre-ACK state on protocol rejection and bounds duplicate initial snapshots", async () => {
+		await flush();
+		const initial = {
+			"@type": "initialState",
+			revision: 0,
+			identity: identity(),
+			compartments: [],
+			devices: [],
+			occupancies: [],
+			storageReady: true,
+		};
+		socket.event(initial);
+		socket.event(initial);
+		await flush();
+		expect(cube.state).toMatchObject({status: "error", error: {code: "LIMIT_EXCEEDED"}});
+		expect(cube.identity).toBeUndefined();
+	});
+
+	it("never accepts protected snapshots before authentication", async () => {
+		socket.event({"@type": "occupancies", occupancies: [occupancy()]});
+		await flush();
+		expect(cube.occupancies.snapshot).toBeUndefined();
+		await expect(cube.openLock("board:1")).rejects.toMatchObject({code: "NOT_READY"});
+	});
+
+	it("times out sent mutation as unknown and closes the underlying correlations without replay", async () => {
 		await ready();
 		const mutation = cube.occupancies.occupyBox({boxNumber: "1", content: {handover: "reconcile-me"}});
 		const unknown = expect(mutation).rejects.toMatchObject({code: "COMMAND_OUTCOME_UNKNOWN"});
+		await vi.advanceTimersByTimeAsync(10000);
+		await unknown;
+		expect(socket.readyState).toBe(3);
+		expect(socket.requests()).toHaveLength(1);
+		expect(Socket.instances).toHaveLength(2);
+		expect(Socket.instances[1].requests()).toHaveLength(0);
+	});
+
+	it("times out reads distinctly", async () => {
+		await ready();
 		const query = cube.storage.keys();
 		const timeout = expect(query).rejects.toMatchObject({code: "TIMEOUT"});
 		await vi.advanceTimersByTimeAsync(10000);
-		await unknown;
 		await timeout;
-		socket.reply(socket.request("occupyBox"), occupancy());
-		socket.event({"@type": "availability", connected: false});
-		await flush();
-		socket.event({"@type": "availability", connected: true});
-		await flush();
+	});
+
+	it("rejects revision gaps and resynchronizes with a fresh socket", async () => {
 		await ready([occupancy()]);
-		expect(socket.requests().filter(f => JSON.parse(f.slice(15))["@type"] === "occupyBox")).toHaveLength(1);
-		expect(cube.occupancies.snapshot).toEqual([occupancy()]);
+		socket.event({"@type": "occupancyEnded", uuid: "one", revision: 8});
+		await flush();
+		expect(cube.occupancies.snapshot).toBeUndefined();
+		expect(cube.state.status).toBe("initializing");
+		expect(Socket.instances).toHaveLength(2);
 	});
 
 	it("treats a malformed ACK for a sent mutation as an unknown outcome", async () => {
@@ -472,11 +527,7 @@ describe("app tokens", () => {
 			const failure = expect(refresh).rejects.toMatchObject({code: "DISCONNECTED"});
 			socket.reply(socket.request("getToken"), refreshed);
 			await failure;
-			if (action === "queued app switch") {
-				expect(cube.identity?.appId).toBe("app-b");
-				await expect(cube.getToken()).resolves.toBe(identity("app-b").token);
-			}
-			else expect(cube.identity).toBeUndefined();
+			expect(cube.identity).toBeUndefined();
 		},
 	);
 
@@ -491,6 +542,6 @@ describe("app tokens", () => {
 		await flush();
 		socket.reply(frame, token("app-a"));
 		await failure;
-		await expect(cube.getToken()).resolves.toBe(identity("app-b").token);
+		await expect(cube.getToken()).rejects.toMatchObject({code: "DISCONNECTED"});
 	});
 });

@@ -3,7 +3,6 @@ import type {
 	ChangeOccupancyAccessOptions,
 	CodeReaderConfig,
 	CompartmentsEvent,
-	CubeCapabilities,
 	CubeIdentity,
 	DevicesEvent,
 	EndOccupancyOptions,
@@ -63,10 +62,6 @@ export interface CodeMessage extends VcmpMessage {
 export interface ConfigureCodeReaderMessage extends VcmpMessage {
 	"@type": "configureCodeReader";
 	config: CodeReaderConfig;
-}
-
-export interface CapabilitiesMessage extends VcmpMessage, CubeCapabilities {
-	"@type": "capabilities";
 }
 
 export interface CubeMessage extends VcmpMessage, CubeIdentity {

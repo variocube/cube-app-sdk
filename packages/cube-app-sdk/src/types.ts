@@ -160,7 +160,7 @@ export interface Device {
 	serialNumber?: string;
 
 	/** Additional information specific to the device. */
-	info?: any;
+	info?: unknown;
 }
 
 /** The context of opening a lock/compartment. */
@@ -173,7 +173,7 @@ export interface OpenContext {
 }
 
 /** An event listener */
-export type EventListener<E> = (event: E) => any;
+export type EventListener<E> = (event: E) => unknown;
 
 export type AvailabilityStatus = "loading" | "ready" | "unavailable" | "error";
 
@@ -182,10 +182,11 @@ export interface AvailabilityState {
 	error?: CubeError;
 }
 
-export interface CubeCapabilities {
-	occupancies: boolean;
-	storage: boolean;
-	identity: boolean;
+export interface ConnectionState {
+	status: "disconnected" | "initializing" | "ready" | "unavailable" | "error";
+	generation?: number;
+	revision?: number;
+	error?: CubeError;
 }
 
 /** The controller chooses appId and token audience. expiresAt is Unix epoch seconds. */
@@ -221,7 +222,7 @@ export interface OccupyCommon extends OpenContext {
 	accessCode?: string;
 	accessCodeShape?: AccessCodeShape;
 	accessKeys?: string[];
-	content?: OccupancyContent;
+	content?: OccupancyContent | null;
 }
 
 export interface OccupyType extends OccupyCommon {
@@ -240,7 +241,7 @@ export interface OccupyBox extends OccupyCommon {
 export type OccupyRequest = OccupyType | OccupyBox;
 
 export interface UpdateOccupancyOptions extends OpenContext {
-	content?: OccupancyContent;
+	content?: OccupancyContent | null;
 	merge?: boolean;
 }
 
@@ -266,7 +267,7 @@ export interface Occupancies {
 	occupy(request: OccupyRequest): Promise<Occupancy>;
 	occupyType(request: OccupyType): Promise<Occupancy>;
 	occupyBox(request: OccupyBox): Promise<Occupancy>;
-	confirm(uuid: string, content?: OccupancyContent, merge?: boolean): Promise<void>;
+	confirm(uuid: string, content?: OccupancyContent | null, merge?: boolean): Promise<void>;
 	cancel(uuid: string): Promise<void>;
 	update(uuid: string, options: UpdateOccupancyOptions): Promise<void>;
 	changeAccess(uuid: string, options: ChangeOccupancyAccessOptions): Promise<void>;
@@ -299,10 +300,6 @@ export interface StorageEvent {
 	key: string;
 }
 
-export interface CapabilitiesEvent {
-	capabilities: CubeCapabilities | undefined;
-}
-
 export interface AvailabilityEvent {
 	occupancies: OccupancyState;
 	storage: AvailabilityState;
@@ -320,7 +317,7 @@ export interface Cube {
 	readonly occupancies: Occupancies;
 	readonly storage: CubeStorage;
 	readonly identity: CubeIdentity | undefined;
-	readonly capabilities: CubeCapabilities | undefined;
+	readonly state: ConnectionState;
 	/** Uses the installed app audience, sharing concurrent refreshes. Never takes an audience argument. */
 	getToken(): Promise<string>;
 	setBoxMaintenance(boxNumber: string, required: boolean): Promise<void>;
@@ -340,7 +337,7 @@ export interface Cube {
 	addEventListener(eventName: "occupancies", listener: EventListener<OccupancyState>): void;
 	addEventListener(eventName: "identity", listener: EventListener<IdentityEvent>): void;
 	addEventListener(eventName: "storage", listener: EventListener<StorageEvent>): void;
-	addEventListener(eventName: "capabilities", listener: EventListener<CapabilitiesEvent>): void;
+	addEventListener(eventName: "state", listener: EventListener<ConnectionState>): void;
 	addEventListener(eventName: "availability", listener: EventListener<AvailabilityEvent>): void;
 	addEventListener(eventName: "occupancyCreated", listener: EventListener<OccupancyChangedEvent>): void;
 	addEventListener(eventName: "occupancyUpdated", listener: EventListener<OccupancyChangedEvent>): void;
@@ -361,7 +358,7 @@ export interface Cube {
 	removeEventListener(eventName: "occupancies", listener: EventListener<OccupancyState>): void;
 	removeEventListener(eventName: "identity", listener: EventListener<IdentityEvent>): void;
 	removeEventListener(eventName: "storage", listener: EventListener<StorageEvent>): void;
-	removeEventListener(eventName: "capabilities", listener: EventListener<CapabilitiesEvent>): void;
+	removeEventListener(eventName: "state", listener: EventListener<ConnectionState>): void;
 	removeEventListener(eventName: "availability", listener: EventListener<AvailabilityEvent>): void;
 	removeEventListener(eventName: "occupancyCreated", listener: EventListener<OccupancyChangedEvent>): void;
 	removeEventListener(eventName: "occupancyUpdated", listener: EventListener<OccupancyChangedEvent>): void;
