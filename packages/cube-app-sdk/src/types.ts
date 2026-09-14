@@ -140,7 +140,8 @@ export type DeviceType =
 	| "ComputeUnit"
 	| "Kiosk"
 	| "Keypad"
-	| "DoorBell";
+	| "DoorBell"
+	| "PowerManagement";
 
 /** Describes a device. */
 export interface Device {
@@ -207,7 +208,8 @@ export interface Occupancy {
 	accessCode: string | null;
 	accessKeys: string[];
 	created: string;
-	content: OccupancyContent | null;
+	/** Absent content remains distinct from explicit JSON null. */
+	content?: OccupancyContent | null;
 	actor: string | null;
 	action: string | null;
 	state: "pending" | "confirmed" | "ended";
