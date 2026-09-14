@@ -1,36 +1,19 @@
 import {bootstrapController, connect, type ControllerSession, type Cube} from "@variocube/cube-app-sdk";
-import {request} from "node:http";
 import {afterAll, beforeAll, expect, test, vi} from "vitest";
 import {WebSocket} from "ws";
+import {MockDriver, MockKiosk} from "./mock-driver";
 
-// Run a native controller dev --fixture single, then set CONTROLLER_KIOSK_SOCKET to that instance's socket.
+// Run an isolated native controller dev --fixture single, then set CONTROLLER_URL.
 const endpoint = process.env.CONTROLLER_URL ?? "http://localhost:9000";
-const socketPath = process.env.CONTROLLER_KIOSK_SOCKET;
+const kiosk = new MockKiosk(endpoint, "http://localhost:5173/?mode=dev#/home");
+const unit = new MockDriver(endpoint, "unit", {id: "sdk-test-unit", type: "ComputeUnit"});
 let cube: Cube;
 let session: ControllerSession;
 
 beforeAll(async () => {
-	if (!socketPath) throw new Error("Set CONTROLLER_KIOSK_SOCKET to the native development instance's kiosk.sock.");
-	const launch = await new Promise<{ url: string }>((resolve, reject) => {
-		const req = request({socketPath, path: "/launch", method: "POST"}, response => {
-			let data = "";
-			response.setEncoding("utf8");
-			response.on("data", chunk => {
-				data += chunk;
-			});
-			response.on("end", () => {
-				if (response.statusCode !== 200) return reject(new Error("Trusted development launch rejected."));
-				try {
-					resolve(JSON.parse(data));
-				}
-				catch {
-					reject(new Error("Invalid launch."));
-				}
-			});
-		});
-		req.on("error", reject);
-		req.end();
-	});
+	await kiosk.start();
+	await unit.start();
+	const launch = await kiosk.launch();
 	const origin = new URL(launch.url).origin;
 	class AppWebSocket extends WebSocket {
 		constructor(url: string) {
@@ -63,6 +46,8 @@ beforeAll(async () => {
 afterAll(() => {
 	cube?.close();
 	session?.close();
+	kiosk.stop();
+	unit.stop();
 	vi.unstubAllGlobals();
 });
 
@@ -95,4 +80,18 @@ test("native authenticated reserve/confirm/access/update/end and read-only JSON/
 test("raw browser access without credentials is rejected", async () => {
 	const response = await fetch(new URL("/app/renew", endpoint), {method: "POST"});
 	expect([401, 403]).toContain(response.status);
+});
+
+test("native SDK restarts target the registered local kiosk and ComputeUnit through VCMP ACK", async () => {
+	await cube.restartUserInterface();
+	expect(kiosk.accepted).toEqual([{"@type": "device:Restart", id: kiosk.id}]);
+	expect(unit.accepted).toEqual([]);
+	await cube.restartOperatingSystem();
+	await cube.restartController();
+	expect(unit.accepted).toEqual([
+		{"@type": "device:Restart", id: unit.id},
+		{"@type": "unit:RestartService", name: "variocube-controller"},
+	]);
+	// These drivers acknowledge only; the test never executes an OS or browser lifecycle action.
+	expect(cube.state.status).toBe("ready");
 });

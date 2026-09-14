@@ -23,13 +23,15 @@ Download/build the matching controller 6 candidate and run:
 
 ```shell
 controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/sdk-controller
-CONTROLLER_URL=http://localhost:9000 CONTROLLER_KIOSK_SOCKET=/tmp/sdk-controller/kiosk.sock npm run test:controller
+CONTROLLER_URL=http://localhost:9000 npm run test:controller
 ```
 
-The test obtains `/launch` over the trusted Unix socket, cleans and exchanges the fragment, and connects the actual SDK
-with browser-origin headers. It exercises reserve/confirm/access/update/end, nullable and binary storage, app JWT audience
-and raw unauthorized renewal. Use an isolated fixture instance: the test accepts real domain mutations.
+The test registers a retained local `Kiosk` driver, requests `kiosk:Launch`, cleans and exchanges the fragment, and connects
+the actual SDK with browser-origin headers. It exercises reserve/confirm/access/update/end, nullable and binary storage, app JWT audience
+and raw unauthorized renewal. A local `ComputeUnit` driver and the kiosk acknowledge real SDK UI, OS and controller restart
+requests without executing physical actions. Use an isolated fixture instance: the test accepts real domain mutations.
 
-Expected fixture: installed `dev-app`, available boxes, `configuration` JSON `{theme:"light"}`, `nullable` JSON null,
+Expected fixture: installed `dev-app` at `http://localhost:5173/?mode=dev#/home`, allowed local drivers `kiosk` and `unit`,
+available boxes, `configuration` JSON `{theme:"light"}`, `nullable` JSON null,
 `binary` bytes `[0,1,255]`. Production services, Java, physical drivers and `cube-app-service` are not prerequisites.
 The developer chooses persistent state explicitly; remove/reset only that selected instance when repeating tests.

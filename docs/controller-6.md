@@ -56,7 +56,8 @@ Storage caches hold at most 128 values of at most 64 KiB each; invalidation book
 `npm run test:browser`: real headless Chromium tests of early cleanup, arbitrary query/hash routing, empty browser
 credential storage, referrer suppression and reload requiring fresh bootstrap. HTTP exchange is a controlled test
 boundary in this suite; it does not stand in for native controller or physical kiosk evidence.
-`npm run test:controller`: opt-in real native Rust lifecycle/storage/token tests using the trusted Unix launcher.
+`npm run test:controller`: opt-in real native Rust lifecycle/storage/token tests using a retained VCMP kiosk driver,
+plus real SDK restart dispatch to mock local kiosk/ComputeUnit drivers.
 
 Physical Cog/Chromium touch, VT, driver feedback and full upgrade/fleet evidence are recorded by the coordinated
 controller/kiosk stages. This SDK branch alone does not establish their acceptance or publish a release.

@@ -103,7 +103,7 @@ against workspace source aliases. CI runs both alongside the normal package buil
 
 `test/fixtures/controller-wire.json` is the byte-identical controller wire fixture (provenance in its README).
 Do not format this shared fixture independently. `test/real-controller.test.ts` is opt-in and exercises the real
-native Rust development fixture through its trusted Unix launcher; see `test/README.md` for startup instructions.
+native Rust development fixture through a retained local VCMP kiosk driver; see `test/README.md` for startup instructions.
 
 Keep extension requests controller-only: `/mock` has no occupancy/storage authority or signed identity. Raw VCMP
 debug logging exposes bearer tokens and must stay disabled even at verbose service log levels. Mock scans can feed
