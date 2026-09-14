@@ -61,6 +61,7 @@ export function bootstrapController(options: BootstrapOptions = {}): Promise<Con
 export class ControllerSession {
 	#credential: Credential | undefined;
 	#refresh: Promise<string> | undefined;
+	#maintenance: Promise<void> | undefined;
 	#timer: ReturnType<typeof setTimeout> | undefined;
 	#closed = false;
 	readonly #invalidations = new Set<() => void>();
@@ -130,6 +131,67 @@ export class ControllerSession {
 			referrerPolicy: "no-referrer",
 			redirect: "error",
 		});
+	}
+
+	/** Enter the controller-owned technician UI using the current authenticated kiosk launch. */
+	openMaintenance(): Promise<void> {
+		if (this.#maintenance) return this.#maintenance;
+		const operation = (async () => {
+			const abort = new AbortController();
+			const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT);
+			try {
+				const response = await this.request("/app/maintenance", {method: "POST", signal: abort.signal});
+				if (!response.ok) throw new CubeError("FORBIDDEN", "The controller refused maintenance navigation.");
+				const reader = response.body?.getReader();
+				if (!reader) throw new Error();
+				const parts: Uint8Array[] = [];
+				let length = 0;
+				try {
+					while (true) {
+						const {done, value} = await reader.read();
+						if (done) break;
+						length += value.length;
+						if (length > 4096) throw new Error();
+						parts.push(value);
+					}
+				}
+				finally {
+					await reader.cancel();
+					reader.releaseLock();
+				}
+				const bytes = new Uint8Array(length);
+				let offset = 0;
+				for (const part of parts) {
+					bytes.set(part, offset);
+					offset += part.length;
+				}
+				const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
+				if (!body || typeof body !== "object" || !("url" in body) || typeof body.url !== "string") {
+					throw new Error();
+				}
+				const url = new URL(body.url);
+				if (
+					url.origin !== new URL(this.endpoint).origin || url.username || url.password || url.search
+					|| !["/maintenance", "/maintenance/"].includes(url.pathname)
+					|| !/^#vc-maintenance=[A-Za-z0-9_-]{43}$/.test(url.hash)
+				) throw new Error();
+				if (this.#closed) throw authenticationRequired();
+				window.location.assign(url.href);
+				this.close();
+			}
+			catch (error) {
+				if (error instanceof CubeError) throw error;
+				throw new CubeError("INVALID_RESPONSE", "Maintenance navigation could not be completed.");
+			}
+			finally {
+				clearTimeout(timer);
+			}
+		})();
+		const tracked = operation.finally(() => {
+			if (this.#maintenance === tracked) this.#maintenance = undefined;
+		});
+		this.#maintenance = tracked;
+		return tracked;
 	}
 
 	onInvalidation(listener: () => void): () => void {

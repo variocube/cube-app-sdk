@@ -16,6 +16,7 @@ beforeEach(() => {
 afterEach(() => {
 	for (const session of sessions.splice(0)) session.close();
 	vi.useRealTimers();
+	vi.unstubAllGlobals();
 });
 
 function envelope(original: string): string {
@@ -153,5 +154,61 @@ describe("memory-only renewal", () => {
 		const pending = session.getCredential();
 		session.close();
 		await expect(pending).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+	});
+});
+
+describe("trusted maintenance navigation", () => {
+	const grant = "a".repeat(43);
+	function make(body: unknown, status = 200) {
+		const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body), {status}));
+		const session = new ControllerSession("https://controller.example", transport, {
+			credential,
+			generation: 1,
+			expiresAt: Math.floor(Date.now() / 1000) + 600,
+		});
+		sessions.push(session);
+		const assign = vi.fn();
+		vi.stubGlobal("window", {location: {assign}});
+		return {session, transport, assign};
+	}
+	it("coalesces requests, sends a bearer header and navigates only to the controller-issued maintenance context", async () => {
+		const url = `https://controller.example/maintenance#vc-maintenance=${grant}`;
+		const {session, transport, assign} = make({url});
+		const first = session.openMaintenance();
+		expect(session.openMaintenance()).toBe(first);
+		await first;
+		expect(assign).toHaveBeenCalledWith(url);
+		expect(transport).toHaveBeenCalledTimes(1);
+		expect(String(transport.mock.calls[0][0])).toBe("https://controller.example/app/maintenance");
+		expect(new Headers(transport.mock.calls[0][1]?.headers).get("Authorization")).toBe(`Bearer ${credential}`);
+		expect(transport.mock.calls[0][1]).toMatchObject({
+			method: "POST",
+			redirect: "error",
+			referrerPolicy: "no-referrer",
+		});
+		await expect(session.getCredential()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+	});
+	it.each([
+		`https://other.example/maintenance#vc-maintenance=${grant}`,
+		`https://controller.example/app#vc-maintenance=${grant}`,
+		`https://controller.example/maintenance?return=https://evil.example#vc-maintenance=${grant}`,
+		`https://user:secret@controller.example/maintenance#vc-maintenance=${grant}`,
+		"https://controller.example/maintenance#vc-maintenance=short",
+		`https://controller.example/maintenance#vc-maintenance=${grant}&other=secret`,
+	])("rejects untrusted or malformed navigation without reflecting its content", async url => {
+		const {session, assign} = make({url});
+		await expect(session.openMaintenance()).rejects.toMatchObject({code: "INVALID_RESPONSE"});
+		expect(assign).not.toHaveBeenCalled();
+		await expect(session.getCredential()).resolves.toBe(credential);
+	});
+	it("denial leaves the app session usable and a concurrent close prevents late navigation", async () => {
+		const denied = make({}, 403);
+		await expect(denied.session.openMaintenance()).rejects.toMatchObject({code: "FORBIDDEN"});
+		await expect(denied.session.getCredential()).resolves.toBe(credential);
+		const closed = make({url: `https://controller.example/maintenance#vc-maintenance=${grant}`});
+		const pending = closed.session.openMaintenance();
+		closed.session.close();
+		await expect(pending).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		expect(closed.assign).not.toHaveBeenCalled();
 	});
 });

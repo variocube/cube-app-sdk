@@ -9,8 +9,6 @@ import {
 	Chip,
 	CircularProgress,
 	Container,
-	FormControlLabel,
-	FormHelperText,
 	GlobalStyles,
 	Grid,
 	List,
@@ -19,7 +17,6 @@ import {
 	ListItemText,
 	Paper,
 	Stack,
-	Switch,
 	Table,
 	TableBody,
 	TableCell,
@@ -44,14 +41,14 @@ import {
 	useStorageItem,
 } from "@variocube/cube-app-react-sdk";
 import {CodeEvent, LockEvent, Occupancy} from "@variocube/cube-app-sdk";
-import React, {Fragment, StrictMode, useEffect, useRef, useState} from "react";
+import React, {StrictMode, useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 
 export function renderApp(session: import("@variocube/cube-app-sdk").ControllerSession) {
 	createRoot(document.getElementById("root")!).render(
 		<StrictMode>
 			<CubeProvider session={session}>
-				<App />
+				<App session={session} />
 			</CubeProvider>
 		</StrictMode>,
 	);
@@ -59,8 +56,7 @@ export function renderApp(session: import("@variocube/cube-app-sdk").ControllerS
 
 type Timestamped<T> = T & { timestamp: number; id: string };
 
-function App() {
-	const [mock, setMock] = useState(false);
+function App({session}: { session: import("@variocube/cube-app-sdk").ControllerSession }) {
 	const [hardwareBusy, setHardwareBusy] = useState(false);
 	const [hardwareError, setHardwareError] = useState<string>();
 	const [hardwareRecovery, setHardwareRecovery] = useState(false);
@@ -109,73 +105,34 @@ function App() {
 			<Stack spacing={4}>
 				<Box>
 					<Typography variant="overline">Variocube Cube App SDK</Typography>
-					<Typography variant="h1">Demo App</Typography>
+					<Typography variant="h1">Development Demo</Typography>
 				</Box>
 
 				<Alert severity={connected ? "success" : "info"} icon={!connected ? <CircularProgress /> : undefined}>
 					<AlertTitle>
-						{connected ? "Connected to cube app service" : "Waiting for connection to cube app service..."}
+						{connected ? "Connected to controller 6" : "Waiting for authenticated controller connection..."}
 					</AlertTitle>
 					{!connected && (
-						<Fragment>
-							<Typography variant="body1" gutterBottom>
-								This demo app requires a connection to the cube app service. The cube app service
-								typically runs on an actual locker and is used by the SDK to enable communication with
-								the locker. Since you are likely running this demo app on your local machine, you need
-								to start the cube app service in order to use its mock implementation of the locker.
-							</Typography>
-							<Typography variant="body1">
-								Please start the cube app service locally with:
-							</Typography>
-							<pre>
-								<code>
-									npx @variocube/cube-app-service
-								</code>
-							</pre>
-						</Fragment>
+						<Typography>
+							The native controller must be running with a fresh authenticated kiosk launch.
+						</Typography>
 					)}
 				</Alert>
 				<IdentityCard />
 				<OccupancyCard />
 				<StorageCard />
-				<Typography variant="h2">Mock Cube</Typography>
-				<Typography variant="body1">
-					This is a mock cube that is used to test the cube app SDK. It will visually display the status of
-					compartments and you simulate the opening and closing of compartments. Also, you can simulate the
-					scanning of codes.
+				<Typography variant="h2">Development simulator</Typography>
+				<Typography>
+					Use the native controller simulator to inspect compartments and send test input.
 				</Typography>
-				{mock && (
-					<Card sx={{height: 600, display: "flex", flexFlow: "column", justifyContent: "center"}}>
-						{connected
-							? (
-								<iframe
-									title="Mock Cube"
-									src="http://localhost:4000/"
-									width="100%"
-									height="100%"
-									style={{border: 0}}
-								/>
-							)
-							: (
-								<Typography variant="body1" color="textSecondary" align="center">
-									The mock cube will be available once the cube app service is started.
-								</Typography>
-							)}
-					</Card>
-				)}
-				<Box>
-					<FormControlLabel
-						label="Use Mock Cube"
-						control={<Switch checked={mock} onChange={() => setMock(!mock)} />}
-					/>
-					<FormHelperText>
-						Enable the mock for hardware UI testing. Occupancies and storage require a real controller.
-					</FormHelperText>
-				</Box>
+				<Button component="a" href={new URL("/dev", session.endpoint).href} target="_blank" rel="noreferrer">
+					Open simulator
+				</Button>
 
 				<Typography variant="h2">Actions</Typography>
 				<Typography variant="body1">
-					Hardware actions are sent to the connected locker or enabled mock.
+					Hardware actions are sent to the connected controller and its configured drivers or development
+					simulator.
 				</Typography>
 				{hardwareError && <Alert severity="warning">{hardwareError}</Alert>}
 				{hardwareRecovery && (
@@ -187,6 +144,13 @@ function App() {
 				)}
 
 				<Stack spacing={2} direction="row">
+					<Button
+						variant="contained"
+						disabled={!connected || hardwareBusy}
+						onClick={() => runHardware(() => session.openMaintenance())}
+					>
+						Maintenance
+					</Button>
 					<Button
 						variant="outlined"
 						disabled={hardwareDisabled}
@@ -367,8 +331,8 @@ function OccupancyCard() {
 			<Stack spacing={2}>
 				<Typography variant="h2">Occupancies</Typography>
 				<Typography>
-					Connect the service to a real controller, including its memory mode, with exactly one installed app.
-					Reservations and storage are held by that controller.
+					Use a native controller development fixture with exactly one installed app. Reservations and storage
+					are held by that controller.
 				</Typography>
 				{occupancies.status !== "ready" && (
 					<Alert severity={occupancies.status === "error" ? "error" : "info"}>
