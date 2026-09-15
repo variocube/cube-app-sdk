@@ -416,6 +416,39 @@ describe("commands and authentication", () => {
 		expect(Socket.instances[1].requests()).toEqual([]);
 	});
 
+	it.each([
+		{status: 503, title: "Session closed before ack"},
+		{status: 503, title: "Service Unavailable"},
+	])("treats uncoded transport NAK before socket close as unknown: $title", async problem => {
+		await ready();
+		const command = cube.openLock("one");
+		const failure = expect(command).rejects.toMatchObject({code: "COMMAND_OUTCOME_UNKNOWN"});
+		socket.reply(socket.request("openLock"), problem, "NAK");
+		await failure;
+		expect(socket.readyState).toBe(1);
+		expect(socket.requests()).toHaveLength(1);
+		socket.close();
+		await vi.advanceTimersByTimeAsync(10000);
+		expect(Socket.instances.flatMap(client => client.requests())).toHaveLength(1);
+	});
+
+	it.each(["OVERLOADED", "UNAVAILABLE", "COMMAND_OUTCOME_UNKNOWN"])(
+		"preserves explicit controller 503 code %s",
+		async code => {
+			await ready();
+			const command = cube.openLock("one");
+			const failure = expect(command).rejects.toMatchObject({code, message: "controller rejection"});
+			socket.reply(socket.request("openLock"), {
+				status: 503,
+				title: "controller rejection",
+				detail: "controller rejection",
+				code,
+			}, "NAK");
+			await failure;
+			expect(socket.requests()).toHaveLength(1);
+		},
+	);
+
 	it("accepts protected state only after authentication and the full ready barrier", async () => {
 		await flush();
 		initial();

@@ -772,10 +772,16 @@ function sameAvailability(a: AvailabilityState, b: AvailabilityState) {
 	return a.status === b.status && a.error?.code === b.error?.code && a.error?.message === b.error?.message;
 }
 function isTransportFailure(error: unknown) {
-	return !!error && typeof error === "object" && "title" in error
-		&& ["Session closed", "Session not open", "Send failed", "Invalid acknowledgement"].includes(
-			String(error.title),
-		);
+	if (!error || typeof error !== "object") return false;
+	const detail = error as { status?: unknown; title?: unknown; code?: unknown; properties?: { code?: unknown } };
+	// A relay can lose its downstream session before it emits a domain NAK. Transport 503s have no controller code;
+	// their wording depends on which VCMP peer detected the loss. Preserve explicit domain rejection codes.
+	if (detail.status === 503 && typeof detail.code !== "string" && typeof detail.properties?.code !== "string") {
+		return true;
+	}
+	return ["Session closed", "Session not open", "Send failed", "Invalid acknowledgement"].includes(
+		String(detail.title),
+	);
 }
 
 /** Reads claims only to manage freshness; authentication/signature verification belongs to the backend. */
