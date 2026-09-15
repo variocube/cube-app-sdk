@@ -78,7 +78,7 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 - `LockStatus`: "OPEN" | "CLOSED" | "BREAKIN" | "BLOCKED"
 - Events: hardware events plus `identity`, `state`, `availability`, `occupancies`, lifecycle events, and `storage`
 - `cube.occupancies`: controller-owned reservation/confirmation/cancellation/update/access/end lifecycle and snapshots
-- `cube.storage`: Center-write-only JSON/blob reads and key invalidations; memory caches only
+- `cube.storage`: Center-write-only JSON/blob reads from full pushed values/deletions; memory caches only
 - `cube.identity` / `getToken()`: controller-issued installed-app credentials; no separate app message/property
 - Availability: `loading`, `ready`, `unavailable`, `error`; unknown data is never represented as loaded-empty
 
@@ -122,8 +122,8 @@ Controller 6 has no capability discovery. Authentication/initial-state and comma
 Lost mutation replies are `COMMAND_OUTCOME_UNKNOWN`; never replay allocate/open/end automatically. Reconcile UUIDs
 or handover references with fresh controller reads. Controller 6 provides contiguous per-session publication revisions; these do not promise global equality across sessions.
 
-`getToken()` caches only above 300 seconds remaining, shares concurrent refreshes, and clears credentials on
-generation changes. Controller renewals arrive via `cube`; `expiresAt` is epoch seconds. Read a token immediately
+`getToken()` reads only the current pushed token and rejects expired/wrong-audience values without sending a request.
+Controller renewals arrive via `cube`; `expiresAt` is epoch seconds. Generation changes clear credentials. Read a token immediately
 before fetch/OpenAPI calls, never persist or log it. Business state remains in the controller, not browser storage.
 
 React hooks share `CubeProvider`: `useOccupancies`, `useOccupancy`, `useStorageItem`, `useStorageValue`,

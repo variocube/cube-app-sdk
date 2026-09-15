@@ -13,7 +13,9 @@ import type {
 	OccupancyCreatedMessage,
 	OccupancyEndedMessage,
 	OccupancyUpdatedMessage,
-	StorageItemChangedMessage,
+	StorageChunkMessage,
+	StorageItemMessage,
+	StorageItemRemovedMessage,
 } from "./messages.js";
 import {eventSchemas, initialStateSchema, replySchema, storageSchema} from "./schema.js";
 import {ControllerSession, PROTOCOL_MAJOR} from "./session.js";
@@ -65,6 +67,17 @@ interface EventMap {
 
 type ListenerRegistry = { [E in keyof EventMap]: Array<EventListener<EventMap[E]>> };
 
+const STORAGE_ITEM_BYTES = 1048576 + 4096;
+const STORAGE_TOTAL_BYTES = 68 * 1048576;
+const STORAGE_CHUNK_BYTES = 48 * 1024;
+
+interface StorageAssembly {
+	key: string;
+	total: number;
+	parts: Uint8Array[];
+	bytes: number;
+}
+
 interface PendingRequest {
 	sent: boolean;
 	mutation: boolean;
@@ -99,7 +112,11 @@ export class CubeImpl implements Cube {
 	readonly #session: ControllerSession;
 	readonly #unsubscribeSession: () => void;
 	#storageAvailable = false;
-	#storageEpoch = 0;
+	#initialReceived = false;
+	#storageBytes = 0;
+	#storageAssembly: StorageAssembly | undefined;
+	#storageTimer: ReturnType<typeof setTimeout> | undefined;
+	readonly #storageSizes = new Map<string, number>();
 	#state: ConnectionState = {status: "disconnected"};
 	#wireGeneration: number | undefined;
 	#wireRevision = 0;
@@ -114,14 +131,10 @@ export class CubeImpl implements Cube {
 	#identity: CubeIdentity | undefined;
 	#controllerConnected: boolean | undefined;
 	#generation = 0;
-	#occupancyRevision = 0;
 	#occupancyState: OccupancyState = {status: "unavailable", error: disconnected()};
 	#storageState: AvailabilityState = {status: "unavailable", error: disconnected()};
 	readonly #pending = new Set<PendingRequest>();
 	readonly #storageItems = new Map<string, StorageItem>();
-	readonly #storageReads = new Map<string, Promise<StorageItem>>();
-	readonly #storageVersions = new Map<string, number>();
-	#tokenRefresh: Promise<string> | undefined;
 	readonly occupancies: Occupancies;
 	readonly storage: CubeStorage;
 
@@ -148,7 +161,12 @@ export class CubeImpl implements Cube {
 			changeAccess: (uuid, options) => this.#request({"@type": "changeOccupancyAccess", uuid, ...options}, true),
 			end: (uuid, options) => this.#request({"@type": "endOccupancy", uuid, ...options}, true),
 			list: access => this.#listOccupancies(access),
-			get: uuid => this.#request({"@type": "getOccupancy", uuid}, false),
+			get: uuid =>
+				this.#localRead(() => {
+					const occupancy = this.#occupancyState.data?.find(item => item.uuid === uuid);
+					if (!occupancy) throw new CubeError("NOT_FOUND", "Occupancy not found in the current snapshot.");
+					return structuredClone(occupancy);
+				}),
 		};
 		this.storage = {
 			get state() {
@@ -168,7 +186,7 @@ export class CubeImpl implements Cube {
 						: Uint8Array.from(atob(item.content as string), character => character.charCodeAt(0));
 					return new Blob([data], {type: item.contentType});
 				}),
-			keys: () => this.#request({"@type": "getStorageKeys"}, false),
+			keys: () => this.#localRead(() => [...this.#storageItems.keys()].sort()),
 		};
 		this.#client = new VcmpClient(options.session.webSocketUrl, {autoStart: false});
 		this.#client.onOpen = () => {
@@ -215,30 +233,61 @@ export class CubeImpl implements Cube {
 			this.#dispatchEvent("close", {});
 		};
 		this.#on<InitialState>("initialState", event => {
-			if (!this.#authenticated || event.generation !== this.#wireGeneration || !validInitialState(event)) {
+			if (
+				!this.#authenticated || (this.#initialReceived && this.#state.status !== "ready")
+				|| event.generation !== this.#wireGeneration || !validInitialState(event)
+			) {
 				this.#fail(new CubeError("INVALID_RESPONSE", "Invalid authenticated initial state."));
 				return;
 			}
+			if (
+				this.#identity
+				&& (event.identity.appId !== this.#identity.appId || event.identity.cubeId !== this.#identity.cubeId)
+			) {
+				this.#fail(new CubeError("AUTHENTICATION_REQUIRED", "The installed app changed."));
+				return;
+			}
+			if (this.#initialReceived && event.revision !== this.#wireRevision + 1) {
+				this.#resynchronize();
+				return;
+			}
+			this.#storageAssembly = undefined;
+			clearTimeout(this.#storageTimer);
 			clearTimeout(this.#initialTimer);
+			this.#initialTimer = setTimeout(
+				() => this.#fail(new CubeError("TIMEOUT", "Initial storage timed out.")),
+				10000,
+			);
+			this.#storageItems.clear();
+			this.#storageSizes.clear();
+			this.#storageBytes = 0;
+			this.#storageAvailable = false;
+			this.#initialReceived = true;
 			this.#wireRevision = event.revision;
 			this.#controllerConnected = true;
 			this.#identity = event.identity;
 			this.#compartments = event.compartments;
 			this.#devices = event.devices;
-			this.#occupancyState = {status: "ready", data: event.occupancies};
-			this.#storageAvailable = event.storageReady;
-			this.#storageState = event.storageReady ? {status: "ready"} : {status: "unavailable"};
-			this.#setState({
-				status: event.storageReady ? "ready" : "unavailable",
-				generation: event.generation,
-				revision: event.revision,
-			});
+			this.#occupancyState = {status: "loading", data: event.occupancies};
+			this.#storageState = {status: "loading"};
+			this.#setState({status: "initializing", generation: event.generation, revision: event.revision});
 			this.#dispatchEvent("identity", {identity: this.#identity});
 			this.#dispatchEvent("compartments", {compartments: this.#compartments});
 			this.#dispatchEvent("devices", {devices: this.#devices});
 			this.#dispatchEvent("occupancies", this.#occupancyState);
 			this.#dispatchAvailability();
-			this.#dispatchEvent("open", {});
+		});
+		this.#on<WireBoundary>("ready", event => {
+			if (this.#storageAssembly) {
+				this.#fail(new CubeError("INVALID_RESPONSE", "Invalid storage readiness barrier."));
+				return;
+			}
+			const alreadyReady = this.#state.status === "ready";
+			clearTimeout(this.#initialTimer);
+			this.#storageAvailable = true;
+			this.#setState({status: "ready", generation: event.generation, revision: event.revision});
+			this.#refreshAvailability(!alreadyReady);
+			if (!alreadyReady) this.#dispatchEvent("open", {});
 		});
 		this.#on<CompartmentsMessage>("compartments", event => {
 			this.#compartments = event.compartments;
@@ -276,7 +325,6 @@ export class CubeImpl implements Cube {
 		);
 		this.#on<OccupancyEndedMessage>("occupancyEnded", event => {
 			if (!this.#acceptExtension() || !this.#identity?.appId) return;
-			this.#occupancyRevision++;
 			if (this.#occupancyState.data) {
 				this.#setOccupancyState({
 					...this.#occupancyState,
@@ -285,17 +333,16 @@ export class CubeImpl implements Cube {
 			}
 			this.#dispatchEvent("occupancyEnded", event);
 		});
-		this.#on<StorageItemChangedMessage>("storageItemChanged", event => {
-			if (!this.#acceptExtension() || !this.#identity?.appId) return;
-			if (this.#storageVersions.size >= 256 && !this.#storageVersions.has(event.key)) {
-				this.#storageEpoch++;
-				this.#storageVersions.clear();
-				this.#storageItems.clear();
-				this.#storageReads.clear();
-			}
-			this.#storageVersions.set(event.key, (this.#storageVersions.get(event.key) ?? 0) + 1);
+		this.#on<StorageItemMessage>("storageItem", event => {
+			if (this.#storageAssembly) throw new CubeError("INVALID_RESPONSE", "Storage chunks were interrupted.");
+			this.#storeItem(event);
+		});
+		this.#on<StorageChunkMessage>("storageChunk", event => this.#receiveStorageChunk(event));
+		this.#on<StorageItemRemovedMessage>("storageItemRemoved", event => {
+			if (this.#storageAssembly) throw new CubeError("INVALID_RESPONSE", "Storage chunks were interrupted.");
+			this.#storageBytes -= this.#storageSizes.get(event.key) ?? 0;
+			this.#storageSizes.delete(event.key);
 			this.#storageItems.delete(event.key);
-			this.#storageReads.delete(event.key);
 			this.#dispatchEvent("storage", {key: event.key});
 		});
 		this.#unsubscribeSession = this.#session.onInvalidation(() =>
@@ -331,7 +378,7 @@ export class CubeImpl implements Cube {
 			}
 			message = parsed.data as T;
 			if (name !== "initialState") {
-				if (!this.#authenticated || this.#state.status !== "ready") return;
+				if (!this.#authenticated || !this.#initialReceived) return;
 				const event = message as WireBoundary;
 				if (event.generation !== this.#wireGeneration) {
 					this.#fail(new CubeError("STALE_RESPONSE", "The installed app generation changed."));
@@ -344,7 +391,16 @@ export class CubeImpl implements Cube {
 				this.#wireRevision = event.revision;
 				this.#setState({...this.#state, revision: event.revision});
 			}
-			handler(message);
+			try {
+				handler(message);
+			}
+			catch (error) {
+				this.#fail(
+					error instanceof CubeError
+						? error
+						: new CubeError("INVALID_RESPONSE", "Invalid controller event content."),
+				);
+			}
 		};
 		this.#client.on<T>(name, receive);
 	}
@@ -355,16 +411,16 @@ export class CubeImpl implements Cube {
 
 	#reset() {
 		this.#generation++;
-		this.#occupancyRevision++;
 		for (const pending of [...this.#pending]) {
 			pending.reject(pending.sent && pending.mutation ? unknownOutcome() : disconnected());
 		}
 		this.#storageAvailable = false;
-		this.#storageEpoch++;
 		this.#storageItems.clear();
-		this.#storageReads.clear();
-		this.#storageVersions.clear();
-		this.#tokenRefresh = undefined;
+		this.#storageSizes.clear();
+		this.#storageBytes = 0;
+		this.#storageAssembly = undefined;
+		this.#initialReceived = false;
+		clearTimeout(this.#storageTimer);
 		this.#identity = undefined;
 		clearTimeout(this.#initialTimer);
 		this.#authenticated = false;
@@ -405,7 +461,7 @@ export class CubeImpl implements Cube {
 
 	#featureState(): AvailabilityState {
 		if (!this.connected) return {status: "unavailable", error: disconnected()};
-		if (!this.#acceptExtension() || !this.#identity) return {status: "loading"};
+		if (!this.#acceptExtension() || !this.#identity || this.#state.status !== "ready") return {status: "loading"};
 		return {status: "ready"};
 	}
 
@@ -437,15 +493,16 @@ export class CubeImpl implements Cube {
 	}
 
 	#replaceSnapshot(data: Occupancy[]) {
-		this.#occupancyRevision++;
-		this.#setOccupancyState({status: "ready", data: data.filter(o => o.appId === this.#identity?.appId)});
+		this.#setOccupancyState({
+			status: this.#state.status === "ready" ? "ready" : "loading",
+			data: data.filter(o => o.appId === this.#identity?.appId),
+		});
 	}
 
 	#upsert(name: "occupancyCreated" | "occupancyUpdated" | "occupancyAccessChanged", event: OccupancyChangedEvent) {
 		if (!this.#acceptExtension() || !this.#identity?.appId || event.occupancy.appId !== this.#identity.appId) {
 			return;
 		}
-		this.#occupancyRevision++;
 		if (this.#occupancyState.data) {
 			const data = [...this.#occupancyState.data];
 			const index = data.findIndex(o => o.uuid === event.occupancy.uuid);
@@ -456,78 +513,87 @@ export class CubeImpl implements Cube {
 		this.#dispatchEvent(name, event);
 	}
 
-	async #listOccupancies(access?: string): Promise<Occupancy[]> {
-		const generation = this.#generation;
-		const revision = this.#occupancyRevision;
-		try {
-			const data = await this.#request<Occupancy[]>({"@type": "getOccupancies", access}, false);
-			if (generation !== this.#generation) throw disconnected();
-			if (access === undefined && revision === this.#occupancyRevision && this.#identity?.appId) {
-				this.#replaceSnapshot(data);
-			}
-			return data;
+	#storeItem(value: unknown) {
+		const item = storageSchema.parse(value);
+		if (!("content" in item) || (item.encoding === "base64" && typeof item.content !== "string")) {
+			throw new CubeError("INVALID_RESPONSE", "Invalid storage content.");
 		}
-		catch (error) {
-			if (access === undefined && generation === this.#generation && revision === this.#occupancyRevision) {
-				const failure = toCubeError(error);
-				this.#setOccupancyState({
-					status: ["DISCONNECTED", "AUTHENTICATION_REQUIRED", "APP_NOT_CONFIGURED"].includes(failure.code)
-						? "unavailable"
-						: "error",
-					error: failure,
-				});
-			}
-			throw error;
+		if (item.encoding === "base64") decodeBase64(item.content as string);
+		const bytes = new TextEncoder().encode(JSON.stringify(item)).byteLength;
+		const total = this.#storageBytes - (this.#storageSizes.get(item.key) ?? 0) + bytes;
+		if (
+			bytes > STORAGE_ITEM_BYTES || total > STORAGE_TOTAL_BYTES
+			|| (!this.#storageItems.has(item.key) && this.#storageItems.size >= 16384)
+		) {
+			throw new CubeError("LIMIT_EXCEEDED", "The complete app storage exceeds the client budget.");
 		}
+		this.#storageItems.set(item.key, item as StorageItem);
+		this.#storageSizes.set(item.key, bytes);
+		this.#storageBytes = total;
+		this.#dispatchEvent("storage", {key: item.key});
 	}
 
-	async #withStorage<T>(key: string, convert: (item: StorageItem) => T): Promise<T> {
-		const generation = this.#generation;
-		const version = this.#storageVersions.get(key) ?? 0;
-		const epoch = this.#storageEpoch;
-		const item = await this.#readStorage(key);
-		// Even cached reads cross an async boundary; never expose a value invalidated in the meantime.
-		if (generation !== this.#generation) throw disconnected();
-		if (epoch !== this.#storageEpoch || version !== (this.#storageVersions.get(key) ?? 0)) {
-			throw new CubeError("STALE_RESPONSE", `Storage item ${key} changed while it was being read.`);
+	#receiveStorageChunk(event: StorageChunkMessage) {
+		if (!this.#storageAssembly) {
+			if (event.index !== 0) throw new CubeError("INVALID_RESPONSE", "Missing first storage chunk.");
+			this.#storageAssembly = {key: event.key, total: event.total, parts: [], bytes: 0};
+			this.#storageTimer = setTimeout(
+				() => this.#fail(new CubeError("TIMEOUT", "Storage transfer timed out.")),
+				10000,
+			);
 		}
-		return convert(item);
+		const assembly = this.#storageAssembly;
+		const bytes = decodeBase64(event.content);
+		if (
+			assembly.key !== event.key || assembly.total !== event.total || event.index !== assembly.parts.length
+			|| bytes.byteLength === 0 || bytes.byteLength > STORAGE_CHUNK_BYTES
+			|| assembly.bytes + bytes.byteLength > STORAGE_ITEM_BYTES
+		) {
+			throw new CubeError("INVALID_RESPONSE", "Invalid storage chunk sequence or size.");
+		}
+		assembly.parts.push(bytes);
+		assembly.bytes += bytes.byteLength;
+		if (assembly.parts.length !== assembly.total) return;
+		const joined = new Uint8Array(assembly.bytes);
+		let offset = 0;
+		for (const part of assembly.parts) {
+			joined.set(part, offset);
+			offset += part.byteLength;
+		}
+		const item = storageSchema.parse(JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(joined)));
+		if (item.key !== assembly.key) throw new CubeError("INVALID_RESPONSE", "Storage chunk key changed.");
+		clearTimeout(this.#storageTimer);
+		this.#storageAssembly = undefined;
+		this.#storeItem(item);
 	}
 
-	async #readStorage(key: string): Promise<StorageItem> {
-		if (!this.#acceptExtension()) throw disconnected();
-		const cached = this.#storageItems.get(key);
-		if (cached) return cached;
-		const pending = this.#storageReads.get(key);
-		if (pending) return pending;
+	#localRead<T>(read: () => T): Promise<T> {
 		const generation = this.#generation;
-		const version = this.#storageVersions.get(key) ?? 0;
-		const epoch = this.#storageEpoch;
-		const request = this.#request<StorageItem>({"@type": "getStorageItem", key}, false).then(item => {
-			if (generation !== this.#generation) throw disconnected();
-			if (epoch !== this.#storageEpoch || version !== (this.#storageVersions.get(key) ?? 0)) {
-				throw new CubeError("STALE_RESPONSE", `Storage item ${key} changed while it was being read.`);
+		return Promise.resolve().then(() => {
+			if (generation !== this.#generation || !this.#acceptExtension()) throw disconnected();
+			if (this.#state.status !== "ready") {
+				throw new CubeError("NOT_READY", "The complete controller snapshot is not available.");
 			}
-			if (
-				!storageSchema.safeParse(item).success || item.key !== key || typeof item.contentType !== "string"
-				|| (item.encoding !== "json" && item.encoding !== "base64")
-				|| (item.encoding === "base64" && typeof item.content !== "string") || !("content" in item)
-			) {
-				throw new CubeError("INVALID_RESPONSE", "Invalid storage reply from the controller.");
-			}
-			if (new TextEncoder().encode(JSON.stringify(item)).byteLength <= 65536) {
-				if (this.#storageItems.size >= 128) {
-					const oldest = this.#storageItems.keys().next().value;
-					if (oldest !== undefined) this.#storageItems.delete(oldest);
-				}
-				this.#storageItems.set(key, item);
-			}
-			return item;
-		}).finally(() => {
-			if (this.#storageReads.get(key) === request) this.#storageReads.delete(key);
+			return read();
 		});
-		this.#storageReads.set(key, request);
-		return request;
+	}
+
+	#listOccupancies(access?: string): Promise<Occupancy[]> {
+		return this.#localRead(() =>
+			structuredClone(
+				(this.#occupancyState.data ?? []).filter(occupancy =>
+					access === undefined || occupancy.accessCode === access || occupancy.accessKeys.includes(access)
+				),
+			)
+		);
+	}
+
+	#withStorage<T>(key: string, convert: (item: StorageItem) => T): Promise<T> {
+		return this.#localRead(() => {
+			const item = this.#storageItems.get(key);
+			if (!item) throw new CubeError("NOT_FOUND", "Storage item not found in the current snapshot.");
+			return convert(structuredClone(item));
+		});
 	}
 
 	#request<T = void>(message: VcmpMessage & Record<string, unknown>, mutation = false): Promise<T> {
@@ -585,40 +651,16 @@ export class CubeImpl implements Cube {
 	}
 
 	getToken(): Promise<string> {
-		if (!this.#acceptExtension()) return Promise.reject(disconnected());
-		if (this.#identity?.token && this.#identity.expiresAt && this.#identity.expiresAt > Date.now() / 1000 + 300) {
-			const generation = this.#generation;
-			return Promise.resolve().then(() => {
-				if (generation !== this.#generation || !this.#acceptExtension()) throw disconnected();
-				if (
-					this.#identity?.token && this.#identity.expiresAt
-					&& this.#identity.expiresAt > Date.now() / 1000 + 300
-				) {
-					return this.#identity.token;
-				}
-				return this.getToken();
-			});
-		}
-		if (this.#tokenRefresh) return this.#tokenRefresh;
-		const generation = this.#generation;
-		const refresh = this.#request<string>({"@type": "getToken"}, false).then(token => {
-			if (generation !== this.#generation || !this.#identity?.appId) throw disconnected();
-			const expiresAt = tokenExpiry(token, this.#identity);
-			this.#identity = {...this.#identity, token, expiresAt};
-			this.#dispatchEvent("identity", {identity: this.#identity});
-			return token;
-		}).finally(() => {
-			if (this.#tokenRefresh === refresh) this.#tokenRefresh = undefined;
-		}).then(token => {
-			// Identity listeners and promise cleanup can run before this public promise settles.
-			if (generation !== this.#generation || !this.#acceptExtension() || !this.#identity?.appId) {
-				throw disconnected();
+		return this.#localRead(() => {
+			const identity = this.#identity;
+			if (!identity?.token || !identity.expiresAt) {
+				throw new CubeError("NOT_READY", "A current app token has not been published.");
 			}
-			tokenExpiry(token, this.#identity);
-			return token;
+			if (tokenExpiry(identity.token, identity) !== identity.expiresAt) {
+				throw new CubeError("INVALID_RESPONSE", "The published token expiry is inconsistent.");
+			}
+			return identity.token;
 		});
-		this.#tokenRefresh = refresh;
-		return refresh;
 	}
 
 	get identity() {
@@ -775,13 +817,22 @@ interface InitialState extends WireBoundary {
 	compartments: Compartment[];
 	devices: Device[];
 	occupancies: Occupancy[];
-	storageReady: boolean;
 }
 
 function validInitialState(value: InitialState): boolean {
 	return initialStateSchema.safeParse(value).success && Number.isSafeInteger(value.revision) && value.revision >= 0
 		&& !!value.identity && typeof value.identity.cubeId === "string" && typeof value.identity.appId === "string"
-		&& typeof value.storageReady === "boolean"
 		&& Array.isArray(value.compartments) && Array.isArray(value.devices) && Array.isArray(value.occupancies)
 		&& value.occupancies.every(occupancy => occupancy.appId === value.identity.appId);
+}
+
+function decodeBase64(value: string): Uint8Array {
+	try {
+		const decoded = atob(value);
+		if (btoa(decoded) !== value) throw new Error();
+		return Uint8Array.from(decoded, char => char.charCodeAt(0));
+	}
+	catch {
+		throw new CubeError("INVALID_RESPONSE", "Invalid base64 storage data.");
+	}
 }

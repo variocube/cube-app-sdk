@@ -49,18 +49,18 @@ await cube.occupancies.end(reservation.uuid, {gracePeriod: 30});
 ```
 
 Allocation and physical opening are separate. Opening acceptance does not establish observed door state; use lock
-events. `occupyType`, `cancel`, `list`, `get`, `setBoxMaintenance`, reader configuration, device events and retained
-restart commands use the same authenticated connection. Authorization is enforced by the controller.
+events. `occupyType`, `cancel`, `setBoxMaintenance`, reader configuration, device events and retained restart commands use the
+same authenticated connection. `list` and `get` read the latest pushed occupancy snapshot locally. Authorization is enforced by the controller.
 
 Lost mutation replies produce `COMMAND_OUTCOME_UNKNOWN`. Reconcile a known UUID or handover reference with fresh
-controller reads; the SDK never replays mutations after disconnect, timeout or cancellation. Generation changes clear
+controller publications; the SDK never replays mutations after disconnect, timeout or cancellation. Generation changes clear
 identity, snapshots and caches. Per-session contiguous publication revisions detect gaps and trigger a fresh snapshot;
 these revisions do not promise global equality across sessions.
 
 Storage is Center-write-only. `cube.storage.get<T>(key)` preserves JSON `null`; missing/deleted values reject with
-`NOT_FOUND`. `getBlob(key)` preserves binary bytes and content type; `keys()` lists keys. Caches are disposable, bounded,
-and cleared on key invalidation or generation change. `getToken()` shares concurrent refreshes and rejects a wrong
-or expired audience without exposing a Center token.
+`NOT_FOUND`. `getBlob(key)` preserves binary bytes and content type; `keys()` lists keys. The SDK retains the complete bounded app snapshot in memory and applies pushed values/deletions; initialization
+finishes only at the controller's `ready` barrier. No read method sends a `get*` request. `getToken()` reads the current
+pushed JWT and rejects a wrong or expired audience without exposing a Center token. The controller pushes token rotations.
 
 ## Native development and checks
 

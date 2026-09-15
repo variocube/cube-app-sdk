@@ -14,6 +14,7 @@ import type {
 	OccupyBox,
 	OccupyType,
 	StorageEvent,
+	StorageItem,
 	UpdateOccupancyOptions,
 } from "./types.js";
 
@@ -96,8 +97,20 @@ export interface OccupancyEndedMessage extends VcmpMessage, OccupancyEndedEvent 
 	"@type": "occupancyEnded";
 }
 
-export interface StorageItemChangedMessage extends VcmpMessage, StorageEvent {
-	"@type": "storageItemChanged";
+export interface StorageItemMessage extends VcmpMessage, StorageItem {
+	"@type": "storageItem";
+}
+
+export interface StorageItemRemovedMessage extends VcmpMessage, StorageEvent {
+	"@type": "storageItemRemoved";
+}
+
+export interface StorageChunkMessage extends VcmpMessage {
+	"@type": "storageChunk";
+	key: string;
+	index: number;
+	total: number;
+	content: string;
 }
 
 export interface OccupyTypeMessage extends VcmpMessage, OccupyType {
@@ -139,27 +152,4 @@ export interface UpdateBoxMaintenanceMessage extends VcmpMessage {
 	"@type": "updateBoxMaintenance";
 	boxNumber: string;
 	maintenanceRequired: boolean;
-}
-
-export interface GetOccupanciesMessage extends VcmpMessage {
-	"@type": "getOccupancies";
-	access?: string;
-}
-
-export interface GetOccupancyMessage extends VcmpMessage {
-	"@type": "getOccupancy";
-	uuid: string;
-}
-
-export interface GetStorageItemMessage extends VcmpMessage {
-	"@type": "getStorageItem";
-	key: string;
-}
-
-export interface GetStorageKeysMessage extends VcmpMessage {
-	"@type": "getStorageKeys";
-}
-
-export interface GetTokenMessage extends VcmpMessage {
-	"@type": "getToken";
 }

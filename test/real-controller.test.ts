@@ -65,7 +65,7 @@ test("native authenticated reserve/confirm/access/update/end and read-only JSON/
 	await cube.occupancies.confirm(occupancy.uuid, {step: "confirmed"}, true);
 	await cube.occupancies.changeAccess(occupancy.uuid, {accessKeys: ["sdk-key"]});
 	await cube.occupancies.update(occupancy.uuid, {content: null});
-	expect((await cube.occupancies.get(occupancy.uuid)).content).toBeNull();
+	await vi.waitFor(async () => expect((await cube.occupancies.get(occupancy.uuid)).content).toBeNull());
 	await cube.occupancies.end(occupancy.uuid, {gracePeriod: 0});
 	expect(await cube.storage.get("configuration")).toEqual({theme: "light"});
 	expect(await cube.storage.get("nullable")).toBeNull();

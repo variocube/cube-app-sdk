@@ -8,9 +8,10 @@ router/application startup, exchanges its one-use grant, and returns an in-memor
 See the [root README](../../README.md) for workflows and the [wire contract](../../docs/controller-6.md) for protocol,
 source provenance, limits and validation. There is no capability discovery or hardware-only feature fallback.
 
-`cube.state` is `ready` only after authenticated initial state. Unknown occupancy data remains `undefined`, while an
+`cube.state` is `ready` only after authenticated initial state, complete storage and the `ready` barrier. Unknown occupancy data remains `undefined`, while an
 authoritative empty snapshot is `[]`. Nullable contents are preserved. Storage reads are Center-write-only and preserve
-JSON null, exact binary bytes and missing/deleted errors. `getToken()` returns only the installed-app backend JWT.
+JSON null, exact binary bytes and missing/deleted errors. `getToken()` returns only the current pushed installed-app backend JWT and rejects expired values.
+Occupancy/storage read methods use the latest pushed cache; none sends a `get*` request.
 
 A lost mutation result is `COMMAND_OUTCOME_UNKNOWN`; never blindly replay allocation, opening or ending. Read the
 controller's authoritative state to reconcile the known UUID/reference. Caches are bounded and live only in memory.

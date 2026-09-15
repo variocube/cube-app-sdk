@@ -4,6 +4,7 @@ import {credentialSchema} from "./schema.js";
 export const PROTOCOL_MAJOR = 6;
 const ENVELOPE = "#vc-bootstrap=";
 const REQUEST_TIMEOUT = 10000;
+let relaunchRequested = false;
 
 export interface BootstrapOptions {
 	/** Trusted controller endpoint configured by the app, never read from URL parameters. */
@@ -29,7 +30,7 @@ export function bootstrapController(options: BootstrapOptions = {}): Promise<Con
 	const history = options.history ?? window.history;
 	const url = new URL(location.href);
 	if (!url.hash.startsWith(ENVELOPE)) {
-		return Promise.reject(new CubeError("AUTHENTICATION_REQUIRED", "A fresh kiosk launch is required."));
+		return requestFreshLaunch(options);
 	}
 	const encoded = url.hash.slice(ENVELOPE.length);
 	// Remove the credential even when parsing fails. Never include input in errors.
@@ -61,7 +62,6 @@ export function bootstrapController(options: BootstrapOptions = {}): Promise<Con
 export class ControllerSession {
 	#credential: Credential | undefined;
 	#refresh: Promise<string> | undefined;
-	#maintenance: Promise<void> | undefined;
 	#timer: ReturnType<typeof setTimeout> | undefined;
 	#closed = false;
 	readonly #invalidations = new Set<() => void>();
@@ -133,65 +133,20 @@ export class ControllerSession {
 		});
 	}
 
-	/** Enter the controller-owned technician UI using the current authenticated kiosk launch. */
-	openMaintenance(): Promise<void> {
-		if (this.#maintenance) return this.#maintenance;
-		const operation = (async () => {
-			const abort = new AbortController();
-			const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT);
-			try {
-				const response = await this.request("/app/maintenance", {method: "POST", signal: abort.signal});
-				if (!response.ok) throw new CubeError("FORBIDDEN", "The controller refused maintenance navigation.");
-				const reader = response.body?.getReader();
-				if (!reader) throw new Error();
-				const parts: Uint8Array[] = [];
-				let length = 0;
-				try {
-					while (true) {
-						const {done, value} = await reader.read();
-						if (done) break;
-						length += value.length;
-						if (length > 4096) throw new Error();
-						parts.push(value);
-					}
-				}
-				finally {
-					await reader.cancel();
-					reader.releaseLock();
-				}
-				const bytes = new Uint8Array(length);
-				let offset = 0;
-				for (const part of parts) {
-					bytes.set(part, offset);
-					offset += part.length;
-				}
-				const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
-				if (!body || typeof body !== "object" || !("url" in body) || typeof body.url !== "string") {
-					throw new Error();
-				}
-				const url = new URL(body.url);
-				if (
-					url.origin !== new URL(this.endpoint).origin || url.username || url.password || url.search
-					|| !["/maintenance", "/maintenance/"].includes(url.pathname)
-					|| !/^#vc-maintenance=[A-Za-z0-9_-]{43}$/.test(url.hash)
-				) throw new Error();
-				if (this.#closed) throw authenticationRequired();
-				window.location.assign(url.href);
-				this.close();
-			}
-			catch (error) {
-				if (error instanceof CubeError) throw error;
-				throw new CubeError("INVALID_RESPONSE", "Maintenance navigation could not be completed.");
-			}
-			finally {
-				clearTimeout(timer);
-			}
-		})();
-		const tracked = operation.finally(() => {
-			if (this.#maintenance === tracked) this.#maintenance = undefined;
-		});
-		this.#maintenance = tracked;
-		return tracked;
+	/** Navigate normally; technician authentication happens in the maintenance UI. */
+	async openMaintenance(): Promise<void> {
+		if (this.#closed) throw authenticationRequired();
+		const target = new URL("/maintenance", this.endpoint);
+		const current = new URL(window.location.href);
+		if (
+			!["http:", "https:"].includes(current.protocol) || current.username || current.password
+			|| current.hash.startsWith(ENVELOPE) || current.hash.startsWith("#vc-maintenance=")
+		) {
+			throw new CubeError("INVALID_REQUEST", "Expected a clean application return URL.");
+		}
+		target.searchParams.set("returnUrl", current.href);
+		window.location.assign(target.href);
+		this.close();
 	}
 
 	onInvalidation(listener: () => void): () => void {
@@ -281,4 +236,34 @@ function authenticationRequired(): CubeError {
 		"AUTHENTICATION_REQUIRED",
 		"Controller authentication expired; a fresh kiosk launch is required.",
 	);
+}
+
+/** One attempt per page, only the configured controller can ask its local kiosk to create the replacement URL. */
+async function requestFreshLaunch(options: BootstrapOptions): Promise<ControllerSession> {
+	if (relaunchRequested) throw authenticationRequired();
+	relaunchRequested = true;
+	const endpoint = trustedEndpoint(options.endpoint ?? "http://localhost:9000");
+	const transport = options.fetch ?? globalThis.fetch.bind(globalThis);
+	const abort = new AbortController();
+	const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT);
+	try {
+		const response = await transport(new URL("/app/relaunch", endpoint), {
+			method: "POST",
+			headers: {"Content-Type": "application/json"},
+			body: "{}",
+			credentials: "omit",
+			cache: "no-store",
+			referrerPolicy: "no-referrer",
+			redirect: "error",
+			signal: abort.signal,
+		});
+		await response.body?.cancel();
+	}
+	catch {
+		// Deliberately no retry, response contents, token recovery or navigation from untrusted response data.
+	}
+	finally {
+		clearTimeout(timer);
+	}
+	throw authenticationRequired();
 }

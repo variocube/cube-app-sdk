@@ -157,10 +157,9 @@ describe("memory-only renewal", () => {
 	});
 });
 
-describe("trusted maintenance navigation", () => {
-	const grant = "a".repeat(43);
-	function make(body: unknown, status = 200) {
-		const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body), {status}));
+describe("ordinary maintenance navigation", () => {
+	function make(href = "https://app.example/start?language=en#route") {
+		const transport = vi.fn<typeof fetch>();
 		const session = new ControllerSession("https://controller.example", transport, {
 			credential,
 			generation: 1,
@@ -168,47 +167,77 @@ describe("trusted maintenance navigation", () => {
 		});
 		sessions.push(session);
 		const assign = vi.fn();
-		vi.stubGlobal("window", {location: {assign}});
+		vi.stubGlobal("window", {location: {assign, href}});
 		return {session, transport, assign};
 	}
-	it("coalesces requests, sends a bearer header and navigates only to the controller-issued maintenance context", async () => {
-		const url = `https://controller.example/maintenance#vc-maintenance=${grant}`;
-		const {session, transport, assign} = make({url});
-		const first = session.openMaintenance();
-		expect(session.openMaintenance()).toBe(first);
-		await first;
-		expect(assign).toHaveBeenCalledWith(url);
-		expect(transport).toHaveBeenCalledTimes(1);
-		expect(String(transport.mock.calls[0][0])).toBe("https://controller.example/app/maintenance");
-		expect(new Headers(transport.mock.calls[0][1]?.headers).get("Authorization")).toBe(`Bearer ${credential}`);
-		expect(transport.mock.calls[0][1]).toMatchObject({
-			method: "POST",
-			redirect: "error",
-			referrerPolicy: "no-referrer",
-		});
+	it("passes the clean return URL with no maintenance credential or request", async () => {
+		const {session, transport, assign} = make();
+		await session.openMaintenance();
+		const target = new URL(assign.mock.calls[0][0]);
+		expect(target.origin + target.pathname).toBe("https://controller.example/maintenance");
+		expect(target.searchParams.get("returnUrl")).toBe("https://app.example/start?language=en#route");
+		expect(target.hash).toBe("");
+		expect(transport).not.toHaveBeenCalled();
 		await expect(session.getCredential()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
 	});
 	it.each([
-		`https://other.example/maintenance#vc-maintenance=${grant}`,
-		`https://controller.example/app#vc-maintenance=${grant}`,
-		`https://controller.example/maintenance?return=https://evil.example#vc-maintenance=${grant}`,
-		`https://user:secret@controller.example/maintenance#vc-maintenance=${grant}`,
-		"https://controller.example/maintenance#vc-maintenance=short",
-		`https://controller.example/maintenance#vc-maintenance=${grant}&other=secret`,
-	])("rejects untrusted or malformed navigation without reflecting its content", async url => {
-		const {session, assign} = make({url});
-		await expect(session.openMaintenance()).rejects.toMatchObject({code: "INVALID_RESPONSE"});
+		"file:///app",
+		"https://user:password@app.example/",
+		"https://app.example/#vc-bootstrap=secret",
+		"https://app.example/#vc-maintenance=secret",
+	])("rejects unsafe return URL %s", async href => {
+		const {session, assign} = make(href);
+		await expect(session.openMaintenance()).rejects.toMatchObject({code: "INVALID_REQUEST"});
 		expect(assign).not.toHaveBeenCalled();
-		await expect(session.getCredential()).resolves.toBe(credential);
 	});
-	it("denial leaves the app session usable and a concurrent close prevents late navigation", async () => {
-		const denied = make({}, 403);
-		await expect(denied.session.openMaintenance()).rejects.toMatchObject({code: "FORBIDDEN"});
-		await expect(denied.session.getCredential()).resolves.toBe(credential);
-		const closed = make({url: `https://controller.example/maintenance#vc-maintenance=${grant}`});
-		const pending = closed.session.openMaintenance();
-		closed.session.close();
-		await expect(pending).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
-		expect(closed.assign).not.toHaveBeenCalled();
+	it("rejects navigation after session disposal", async () => {
+		const {session, assign} = make();
+		session.close();
+		await expect(session.openMaintenance()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		expect(assign).not.toHaveBeenCalled();
 	});
+});
+
+describe("missing bootstrap recovery", () => {
+	it.each([202, 403, "timeout"] as const)(
+		"asks for a kiosk reload once with no returned credential: %s",
+		async outcome => {
+			vi.resetModules();
+			const {bootstrapController: bootstrap} = await import("../src/session.js");
+			const transport = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+				if (outcome === "timeout") {
+					return new Promise((_resolve, reject) =>
+						init?.signal?.addEventListener("abort", () => reject(new Error("aborted")))
+					);
+				}
+				return new Response(
+					JSON.stringify({url: "https://untrusted.example/#secret", credential: "must-not-use"}),
+					{status: outcome},
+				);
+			});
+			const replaceState = vi.fn();
+			const options = {
+				endpoint: "https://controller.example",
+				location: {href: "https://app.example/#route"},
+				history: {state: null, replaceState},
+				fetch: transport,
+			};
+			const result = expect(bootstrap(options)).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+			if (outcome === "timeout") await vi.advanceTimersByTimeAsync(10000);
+			await result;
+			await expect(bootstrap(options)).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+			expect(transport).toHaveBeenCalledTimes(1);
+			expect(String(transport.mock.calls[0][0])).toBe("https://controller.example/app/relaunch");
+			expect(transport.mock.calls[0][1]).toMatchObject({
+				method: "POST",
+				body: "{}",
+				credentials: "omit",
+				cache: "no-store",
+				referrerPolicy: "no-referrer",
+				redirect: "error",
+			});
+			expect(new Headers(transport.mock.calls[0][1]?.headers).has("Authorization")).toBe(false);
+			expect(replaceState).not.toHaveBeenCalled();
+		},
+	);
 });

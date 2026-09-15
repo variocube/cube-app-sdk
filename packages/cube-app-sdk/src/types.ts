@@ -274,6 +274,7 @@ export interface Occupancies {
 	update(uuid: string, options: UpdateOccupancyOptions): Promise<void>;
 	changeAccess(uuid: string, options: ChangeOccupancyAccessOptions): Promise<void>;
 	end(uuid: string, options?: EndOccupancyOptions): Promise<void>;
+	/** Reads the latest pushed snapshot, optionally matching accessCode or an access key. */
 	list(access?: string): Promise<Occupancy[]>;
 	get(uuid: string): Promise<Occupancy>;
 }
@@ -320,7 +321,7 @@ export interface Cube {
 	readonly storage: CubeStorage;
 	readonly identity: CubeIdentity | undefined;
 	readonly state: ConnectionState;
-	/** Uses the installed app audience, sharing concurrent refreshes. Never takes an audience argument. */
+	/** Reads the current pushed token for the installed app; rejects expired tokens. Never sends a refresh request. */
 	getToken(): Promise<string>;
 	setBoxMaintenance(boxNumber: string, required: boolean): Promise<void>;
 	requireBoxMaintenance(boxNumber: string): Promise<void>;

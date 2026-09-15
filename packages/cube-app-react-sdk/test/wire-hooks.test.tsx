@@ -5,7 +5,7 @@ import {createRoot} from "react-dom/client";
 import {expect, it, vi} from "vitest";
 import fixtures from "../../../test/fixtures/controller-wire.json";
 import {CubeImpl} from "../../cube-app-sdk/src/cube";
-import {CubeProvider, useOccupancies, useOccupancy} from "../src/index";
+import {CubeProvider, useOccupancies, useOccupancy, useStorageItem} from "../src/index";
 
 const wire = vi.hoisted(() => ({
 	connected: true,
@@ -58,7 +58,8 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 	function Probe() {
 		const all = useOccupancies();
 		const item = useOccupancy("reservation");
-		return <output>{JSON.stringify({all, item})}</output>;
+		const stored = useStorageItem("config");
+		return <output>{JSON.stringify({all, item, stored})}</output>;
 	}
 	const read = () => JSON.parse(container.textContent ?? "null");
 	let revision = 0;
@@ -95,9 +96,33 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 				compartments: [],
 				devices: [],
 				occupancies: [pending],
-				storageReady: true,
 			})
 		);
+		expect(read().stored.status).toBe("loading");
+		await act(async () =>
+			emit({
+				"@type": "storageItem",
+				key: "config",
+				encoding: "json",
+				contentType: "application/json",
+				content: null,
+			})
+		);
+		expect(read().stored.status).toBe("loading");
+		await act(async () => emit({"@type": "ready"}));
+		expect(read().stored).toEqual({status: "ready", data: null});
+		await act(async () =>
+			emit({
+				"@type": "storageItem",
+				key: "config",
+				encoding: "json",
+				contentType: "application/json",
+				content: {value: 1},
+			})
+		);
+		expect(read().stored).toEqual({status: "ready", data: {value: 1}});
+		await act(async () => emit({"@type": "storageItemRemoved", key: "config"}));
+		expect(read().stored.status).toBe("not-found");
 		expect(read().item.data.state).toBe("pending");
 		const confirmed = {...pending, state: "confirmed"};
 		await act(async () => emit({"@type": "occupancyCreated", occupancy: confirmed}));
@@ -120,7 +145,7 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 		expect(read().all).not.toHaveProperty("data");
 	}
 	finally {
-		session.close();
+		await act(async () => session.close());
 		await act(async () => root.unmount());
 	}
 });

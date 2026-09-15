@@ -50,6 +50,13 @@ const deviceSchema = z.object({
 	serialNumber: text.optional(),
 	info: z.unknown().optional(),
 });
+export const storageSchema = z.object({
+	key: text,
+	contentType: text,
+	encoding: z.enum(["json", "base64"]),
+	content: z.unknown(),
+});
+
 const boundary = {generation: integer, revision: integer};
 export const initialStateSchema = z.object({
 	...boundary,
@@ -57,7 +64,6 @@ export const initialStateSchema = z.object({
 	compartments: z.array(compartmentSchema).max(4096),
 	devices: z.array(deviceSchema).max(4096),
 	occupancies: z.array(occupancySchema).max(65536),
-	storageReady: z.boolean(),
 });
 export const eventSchemas: Record<string, z.ZodType> = {
 	initialState: initialStateSchema,
@@ -75,7 +81,16 @@ export const eventSchemas: Record<string, z.ZodType> = {
 	occupancyUpdated: z.object({...boundary, occupancy: occupancySchema}),
 	occupancyAccessChanged: z.object({...boundary, occupancy: occupancySchema}),
 	occupancyEnded: z.object({...boundary, uuid: text}),
-	storageItemChanged: z.object({...boundary, key: text}),
+	storageItem: storageSchema.extend(boundary),
+	storageItemRemoved: z.object({...boundary, key: text}),
+	storageChunk: z.object({
+		...boundary,
+		key: text,
+		index: integer.max(21),
+		total: integer.min(1).max(22),
+		content: z.string().max(65536),
+	}),
+	ready: z.object(boundary),
 	code: z.object({...boundary, code: text, source: z.enum(["KEYPAD", "SCANNER", "NFC"])}),
 	lock: z.object({
 		...boundary,
@@ -97,10 +112,4 @@ export const credentialSchema = z.object({
 	credential: z.string().min(16).max(4096),
 	expiresAt: integer,
 	generation: integer,
-});
-export const storageSchema = z.object({
-	key: text,
-	contentType: text,
-	encoding: z.enum(["json", "base64"]),
-	content: z.unknown(),
 });

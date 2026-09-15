@@ -8,6 +8,14 @@ for (const route of ["/?x=1&x=%26#/deep?a=%23", "/?q=%E2%98%83#fragment", "/#vc-
 		const launch = new URL(original);
 		launch.hash = "vc-bootstrap=" + encodeURIComponent(JSON.stringify({grant, fragment: original.hash}));
 		let exchanges = 0;
+		let relaunches = 0;
+		await page.route("**/app/relaunch", async request => {
+			relaunches++;
+			expect(request.request().headers().authorization).toBeUndefined();
+			expect(request.request().headers().referer).toBeUndefined();
+			expect(request.request().postDataJSON()).toEqual({});
+			await request.fulfill({status: 202, json: {requested: true}});
+		});
 		await page.route("**/app/bootstrap", async request => {
 			exchanges++;
 			expect(page.url()).toBe(original.href);
@@ -32,5 +40,6 @@ for (const route of ["/?x=1&x=%26#/deep?a=%23", "/?q=%E2%98%83#fragment", "/#vc-
 		await page.reload();
 		await expect(page.locator("#status")).toHaveText("fresh launch required");
 		expect(exchanges).toBe(1);
+		expect(relaunches).toBe(original.hash.startsWith("#vc-bootstrap=") ? 0 : 1);
 	});
 }

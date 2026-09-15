@@ -77,8 +77,8 @@ function RefreshButton() {
 }
 ```
 
-`getToken()` chooses the installed app's exact audience on the controller. It deduplicates refresh requests and only uses
-a cached token with more than 300 seconds remaining. For generated OpenAPI clients, call it from the client's asynchronous
+`getToken()` reads the current pushed token for the controller-selected installed app and rejects expired tokens.
+The controller pushes rotations; this method never sends a refresh request. For generated OpenAPI clients, call it from the client's asynchronous
 authorization callback before each request. Do not keep a token captured when constructing a client.
 
 The demo includes reserve/confirm/cancel/end, the occupancy hooks, JSON and blob reads, and identity metadata. It requires

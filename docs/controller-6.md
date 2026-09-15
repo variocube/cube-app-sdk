@@ -32,8 +32,7 @@ Its ACK is `{protocolMajor:6,generation}`. Until the ACK validates, the SDK buff
   "identity": { "cubeId": "cube-1", "appId": "dev-app", "token": null, "expiresAt": null },
   "compartments": [],
   "devices": [],
-  "occupancies": [],
-  "storageReady": true
+  "occupancies": []
 }
 ```
 
@@ -42,12 +41,39 @@ event. ACK results use `{generation,revision,result}` without advancing publicat
 session's stream, including local device/identity events; they are not a global domain transaction sequence. Gaps close
 and reopen the socket to resnapshot. Changed app generations require a fresh kiosk launch and never inherit authority.
 
-The mandatory request payloads retain the reviewed occupancy/storage/hardware names. Server ownership, nullable
-occupancy content and actor/action fields, `occupancyCreated` confirmation upserts and `occupancyEnded` cancellation
-removals remain intact. Zod validates event and response boundaries. At most 64 requests and 64 KiB per request are
-admitted, each with its original 10-second deadline. Timeouts close the underlying VCMP session to reclaim correlation
-callbacks. Sent mutations become uncertain; reads return a timeout/disconnect. No automatic mutation replay occurs.
-Storage caches hold at most 128 values of at most 64 KiB each; invalidation bookkeeping is bounded at 256 keys.
+The SDK sends authentication and mutations only. `getOccupancy`, `getOccupancies`, `getStorageItem`, `getStorageKeys`
+and `getToken` are removed from the wire. The public async read methods read the latest complete pushed cache without
+network requests. Local reads can trail a just-acknowledged mutation until its publication arrives; use events or wait
+for the expected UUID/state when reconciling. No mutation is replayed automatically.
+
+Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
+publication uses the contiguous per-session revision, including storage chunks and the ready barrier:
+
+- `storageItem {generation,revision,key,contentType,encoding,content}` contains the complete value; encoding is `json`
+  or `base64`. Explicit JSON null is a value, not deletion.
+- `storageItemRemoved {generation,revision,key}` explicitly deletes a key.
+- `storageChunk {generation,revision,key,index,total,content}` carries standard base64 of at most 48 KiB of raw bytes.
+  The zero-based chunks arrive sequentially. Concatenated bytes are UTF-8 JSON for the complete StorageItem object
+  `{key,contentType,encoding,content}`. The replacement becomes visible only after all chunks validate.
+- `cube` pushes current identity and renewed backend JWTs. `getToken()` validates the current cached audience and
+  expiry; it never requests a replacement token. Controller renewal must arrive before expiry.
+
+Storage holds the complete app snapshot without eviction: at most 16384 keys, 1 MiB + 4096 bytes per serialized item,
+68 MiB total serialized content, and one incomplete transfer. This covers the supported 64 MiB persisted store plus
+wire metadata. Overflow, malformed chunks and incomplete transfers fail closed. Disconnect or a changed app generation
+clears all caches; an incomplete snapshot never becomes ready or reports missing data as an empty store. A complete
+same-generation resnapshot can replace data at its ready barrier; it does not retry pending mutations.
+
+Zod validates event and response boundaries. At most 64 mutation requests and 64 KiB per request are admitted, with a
+10-second deadline. Timeouts close the underlying VCMP session to reclaim correlations and report
+`COMMAND_OUTCOME_UNKNOWN`. Authentication/initial storage and each chunked item also have bounded deadlines.
+
+`session.openMaintenance()` navigates normally to the trusted controller's `/maintenance?returnUrl=...`, carrying only
+the clean current app URL. It requests no maintenance context and passes no credential in that URL. Technician login
+belongs to the maintenance UI. When a page has no bootstrap envelope, `bootstrapController()` makes at most one bounded
+`POST /app/relaunch` request per page, then reports authentication required while waiting for the trusted kiosk to reload
+a fresh launch. The controller authorizes that unauthenticated retry only for an actual loopback peer and the configured
+app Origin. The response cannot issue a grant to this helper, choose navigation or trigger automatic retries.
 
 ## Validation and remaining evidence
 
