@@ -216,13 +216,13 @@ export class CubeImpl implements Cube {
 		);
 		this.#on<OccupancyEndedMessage>("occupancyEnded", event => {
 			if (!this.#acceptExtension() || !this.#identity?.appId) return;
+			// The other three lifecycle events are scoped by `occupancy.appId`, which an end does not
+			// carry. The snapshot is what attributes it; an end that cannot be attributed at all is
+			// still dispatched, rather than swallowing a real one.
+			const data = this.#occupancyState.data;
+			if (data && !data.some(o => o.uuid === event.uuid)) return;
 			this.#occupancyRevision++;
-			if (this.#occupancyState.data) {
-				this.#setOccupancyState({
-					...this.#occupancyState,
-					data: this.#occupancyState.data.filter(o => o.uuid !== event.uuid),
-				});
-			}
+			if (data) this.#setOccupancyState({...this.#occupancyState, data: data.filter(o => o.uuid !== event.uuid)});
 			this.#dispatchEvent("occupancyEnded", event);
 		});
 		this.#on<StorageItemChangedMessage>("storageItemChanged", event => {

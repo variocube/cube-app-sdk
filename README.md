@@ -300,6 +300,11 @@ and empty. `loading`, `unavailable`, and `error` never establish absence. The `o
 them. Snapshots replace the array. Data is cleared on disconnect and direct app changes. The lifecycle events follow
 the controller's names: a confirmation arrives as `occupancyCreated` and a cancellation as `occupancyEnded`.
 
+Everything is scoped to the installed app. A snapshot keeps the entries belonging to it and drops the rest, rather
+than discarding the whole snapshot over one foreign entry. `occupancyEnded` carries only a `uuid`, so the snapshot is
+what attributes it: an end for a uuid this app does not hold is not dispatched, while an end that cannot be attributed
+at all — no snapshot yet — is still dispatched rather than swallowing a real one.
+
 `addEventListener` returns a function that removes the listener; `CubeEventMap` types every event name and payload.
 
 The landed controller does not globally serialize concurrent snapshots and lifecycle notifications. The service

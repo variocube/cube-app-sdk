@@ -259,8 +259,17 @@ describe("authoritative state and invalidation", () => {
 			await flush();
 			expect(cube.occupancies.state.data).toEqual([value]);
 		}
+		// An end carries no appId, so the snapshot is what scopes it to this app.
+		const ended = vi.fn();
+		const removeEnded = cube.addEventListener("occupancyEnded", ended);
+		socket.event({"@type": "occupancyEnded", uuid: "another-app"});
+		await flush();
+		expect(ended).not.toHaveBeenCalled();
+		expect(cube.occupancies.state.data).toHaveLength(1);
 		socket.event({"@type": "occupancyEnded", uuid: "one"});
 		await flush();
+		expect(ended).toHaveBeenCalledTimes(1);
+		removeEnded();
 		expect(cube.occupancies.state.data).toEqual([]);
 		socket.event({"@type": "occupancies", occupancies: [occupancy("replacement")]});
 		await flush();

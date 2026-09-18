@@ -291,6 +291,22 @@ describe("service over real VCMP WebSockets", () => {
 		expect(mock.messages.some(message => message["@type"] === "getStorageItem")).toBe(false);
 	});
 
+	// The persistent error listener that replaced `once("error", reject)` still has to reject
+	// startup. Its other half — logging and stopping on an error raised after the server is
+	// listening — is not reachable from here, because the web server is private to `Server`.
+	it("rejects startup when the port is already taken", async () => {
+		const upstream = await controller();
+		const {url} = await service(upstream.port);
+		const second = new Server({
+			host: "127.0.0.1",
+			port: Number(new URL(url).port),
+			controllerHost: "127.0.0.1",
+			controllerPort: upstream.port,
+		});
+		cleanup.push(() => second.stop());
+		await expect(second.ready).rejects.toMatchObject({code: "EADDRINUSE"});
+	});
+
 	it("suppresses VCMP payload logging, including token replies, and stops controller reconnects", async () => {
 		const calls: unknown[][] = [];
 		for (const method of ["debug", "info", "warn", "error"] as const) {
