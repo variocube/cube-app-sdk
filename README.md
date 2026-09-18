@@ -91,10 +91,10 @@ rotations; they are not identity changes.
 Download the matching native controller candidate and start an isolated instance:
 
 ```shell
-controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/my-controller
+variocube-controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/my-controller
 npm ci
 npm run dev --workspace packages/cube-app-demo
-CONTROLLER_URL=http://localhost:9000 CONTROLLER_KIOSK_SOCKET=/tmp/my-controller/kiosk.sock npm run test:controller
+CONTROLLER_URL=http://localhost:9000 npm run test:controller
 ```
 
 The trusted development launcher or kiosk must deliver the issued app URL; opening the clean app URL alone cannot
