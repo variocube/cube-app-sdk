@@ -41,10 +41,15 @@ jobs:
     - run: npx playwright install --with-deps chromium
     - run: npm run test:browser
 
+    # `--pre-dist-tag` only applies to versions carrying a prerelease identifier
+    # (2.0.0-rc.1), so a release candidate lands on `next` while full releases
+    # keep going to `latest`. Without it lerna falls back to npm's default tag
+    # and an RC would become `latest` for every consumer.
     - if: github.event_name == 'release'
-      run: npx lerna publish from-package --yes --no-private
+      run: npx lerna publish from-package --yes --no-private --pre-dist-tag next
 
-    - if: github.event_name == 'release'
+    # The published demo tracks what `latest` installs, so pre-releases skip it.
+    - if: github.event_name == 'release' && !github.event.release.prerelease
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         folder: ./packages/cube-app-demo/dist # The folder the action should deploy.

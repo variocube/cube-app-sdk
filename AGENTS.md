@@ -144,7 +144,16 @@ repo stay at `0.0.0` — the published version comes from the release tag.
 2. The `release: published` event triggers CI, which:
    - stamps the tag's version into every package via `lerna version --no-git-tag-version`,
    - publishes the public packages to npm (`lerna publish from-package`) under `@variocube`,
-   - deploys the demo to GitHub Pages.
+   - deploys the demo to GitHub Pages (full releases only).
+
+### Pre-releases
+
+`./release.sh 2.0.0-rc.1 --prerelease` cuts a release candidate. The `published` event fires for pre-releases too,
+so the same pipeline runs, with two differences: `--pre-dist-tag next` puts prerelease versions on the npm dist-tag
+`next` instead of `latest` — the flag applies only to versions carrying a prerelease identifier, so full releases are
+untouched — and the demo is not deployed. Consumers must pin the exact version or install `@next`; a caret range like
+`^1.3.1` never resolves a prerelease. `release.sh` refuses a prerelease version without `--prerelease` and vice versa,
+because CI derives the dist-tag from the version while the demo deployment and the "Latest" badge follow the flag.
 
 ## Rust controller major 6 integration
 
