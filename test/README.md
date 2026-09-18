@@ -2,8 +2,7 @@
 
 Run `npm ci`, `npm test`, `npm run typecheck`, and `npm run build` from the repository root.
 Core/React tests exercise authenticated readiness, nullable occupancy/storage contracts, generation and revision changes,
-uncertain mutation outcomes, stale cache rejection, bounded requests and renewal failures. Retained Node-service tests
-are SDK 1 compatibility regressions and do not run the new SDK through a Java relay.
+uncertain mutation outcomes, stale cache rejection, bounded requests and renewal failures.
 
 ## Real Chromium
 
@@ -34,5 +33,5 @@ requests without executing physical actions. Use an isolated fixture instance: t
 
 Expected fixture: installed `dev-app` at `http://localhost:5173/?mode=dev#/home`, allowed local drivers `kiosk` and `unit`,
 available boxes, `configuration` JSON `{theme:"light"}`, `nullable` JSON null,
-`binary` bytes `[0,1,255]`. Production services, Java, physical drivers and `cube-app-service` are not prerequisites.
+`binary` bytes `[0,1,255]`. Production services, Java and physical drivers are not prerequisites.
 The developer chooses persistent state explicitly; remove/reset only that selected instance when repeating tests.
