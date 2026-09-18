@@ -162,9 +162,23 @@ export class Server {
 			void this.#appServer.broadcast(message);
 		}, true);
 
+		let failStartup: ((error: unknown) => void) | undefined;
 		this.ready = new Promise((resolve, reject) => {
-			this.#webServer.once("listening", () => resolve());
-			this.#webServer.once("error", reject);
+			failStartup = reject;
+			this.#webServer.once("listening", () => {
+				failStartup = undefined;
+				resolve();
+			});
+		});
+		// The server keeps emitting errors after it listens, and Node throws an unhandled one. Once
+		// startup has settled, rejecting `ready` again does nothing, so log and shut down instead.
+		this.#webServer.on("error", error => {
+			if (failStartup) {
+				failStartup(error);
+				return;
+			}
+			log.error("Web server error", error);
+			void this.stop().catch(() => undefined);
 		});
 		this.ready.catch(error => {
 			log.error("Error starting web server", error);

@@ -161,9 +161,35 @@ describe("controller relay", () => {
 		mutation.resolve(occupancy);
 		const count = broadcast.mock.calls.length;
 		relay.occupancyChanged({"@type": "occupancyCreated", occupancy});
-		relay.snapshot({"@type": "occupancies", occupancies: [occupancy]});
 		expect(broadcast.mock.calls.length).toBe(count);
+		// App A's entry is filtered out of the snapshot rather than dropping the whole snapshot, so
+		// app B learns it has no occupancies instead of keeping whatever it last saw.
+		relay.snapshot({"@type": "occupancies", occupancies: [occupancy]});
+		expect(broadcast).toHaveBeenLastCalledWith(fixture.emptySnapshot);
+		expect(relay.initialMessages.at(-1)).toEqual(fixture.emptySnapshot);
 		relay.snapshot({"@type": "occupancies", occupancies: []});
+		expect(relay.initialMessages.at(-1)).toEqual(fixture.emptySnapshot);
+	});
+
+	it("keeps a mixed snapshot, relaying only the installed app's entries", () => {
+		const {relay, broadcast} = setup();
+		const foreign: Occupancy = {...occupancy, uuid: "occ-b", appId: "app-b"};
+		relay.snapshot({"@type": "occupancies", occupancies: [occupancy, foreign]});
+		// A foreign entry filters out; it must not discard the whole snapshot and strand attached
+		// apps on a stale list, and the relayed snapshot must not leak the other app's occupancy.
+		const expected = {"@type": "occupancies", occupancies: [occupancy]};
+		expect(broadcast).toHaveBeenLastCalledWith(expected);
+		expect(relay.initialMessages.at(-1)).toEqual(expected);
+	});
+
+	it("scopes an end, which carries no appId, to the installed app's snapshot", () => {
+		const {relay, broadcast} = setup();
+		relay.snapshot({"@type": "occupancies", occupancies: [occupancy]});
+		const count = broadcast.mock.calls.length;
+		relay.occupancyChanged({"@type": "occupancyEnded", uuid: "occ-b"});
+		expect(broadcast.mock.calls.length).toBe(count);
+		relay.occupancyChanged({"@type": "occupancyEnded", uuid: occupancy.uuid});
+		expect(broadcast).toHaveBeenLastCalledWith({"@type": "occupancyEnded", uuid: occupancy.uuid});
 		expect(relay.initialMessages.at(-1)).toEqual(fixture.emptySnapshot);
 	});
 

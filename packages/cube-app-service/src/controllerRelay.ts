@@ -104,16 +104,26 @@ export class ControllerRelay {
 	}
 
 	snapshot(message: OccupanciesMessage) {
-		if (!this.#connected || !this.#identity) return;
-		if (message.occupancies.some(occupancy => occupancy.appId !== this.#identity?.appId)) return;
-		this.#snapshot = message;
-		this.#options.broadcast(message);
+		if (!this.#connected || !this.#identity?.appId) return;
+		// Filter the foreign entries out rather than dropping the snapshot: dropping it would leave
+		// every attached app on a stale list indefinitely and make the SDK's own filter unreachable.
+		const occupancies = message.occupancies.filter(occupancy => occupancy.appId === this.#identity?.appId);
+		this.#snapshot = {...message, occupancies};
+		this.#options.broadcast(this.#snapshot);
 	}
 
 	occupancyChanged(message: VcmpMessage & { occupancy?: Occupancy; uuid?: string }) {
 		if (!this.#connected || !this.#identity?.appId) return;
 		// Ignore events for an old app if an upstream queued event crosses an app change.
 		if (message.occupancy && message.occupancy.appId !== this.#identity.appId) return;
+		// An end carries only a uuid, so the snapshot is the only thing that attributes it. An end
+		// that cannot be attributed at all is still relayed, rather than swallowing a real one.
+		if (
+			!message.occupancy && this.#snapshot
+			&& !this.#snapshot.occupancies.some(occupancy => occupancy.uuid === message.uuid)
+		) {
+			return;
+		}
 		if (this.#snapshot) {
 			const uuid = message.occupancy?.uuid ?? message.uuid;
 			const occupancies = this.#snapshot.occupancies.filter(occupancy => occupancy.uuid !== uuid);
