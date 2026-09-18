@@ -120,7 +120,8 @@ Exactly one installed Center app is resolved by the controller; requests cannot 
 Use the actual controller `api/app` message classes: occupancy states are `pending`, `confirmed`, `ended`,
 confirmation upserts via `occupancyCreated`, and cancellation removes pending reservations via `occupancyEnded`.
 Preserve full nullable occupancy fields and content. The service caches snapshots in memory and relays typed ACK
-results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`).
+results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`). `occupancyEnded` carries
+no `appId`, so the snapshot attributes it; an unattributable end is still dispatched rather than swallowed.
 
 On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
 Controller 6 has no capability discovery. Authentication/initial-state and commands have 10-second deadlines.

@@ -250,8 +250,16 @@ describe("pushed state and local reads", () => {
 			await flush();
 			expect(cube.occupancies.get("one")).toMatchObject({content: {type}});
 		}
+		// An end carries no appId, so the snapshot is what scopes it to this app.
+		const ended = vi.fn();
+		cube.addEventListener("occupancyEnded", ended);
+		socket.event({"@type": "occupancyEnded", uuid: "another-app"});
+		await flush();
+		expect(ended).not.toHaveBeenCalled();
+		expect(cube.occupancies.list()).toHaveLength(1);
 		socket.event({"@type": "occupancyEnded", uuid: "one"});
 		await flush();
+		expect(ended).toHaveBeenCalledTimes(1);
 		expect(cube.occupancies.list()).toEqual([]);
 		expect(cube.occupancies.get("one")).toBeUndefined();
 	});
@@ -583,6 +591,31 @@ describe("commands and authentication", () => {
 		old.event({"@type": "storageItem", ...fixture.storage[0], content: "stale"});
 		await flush();
 		expect(cube.storage.get("json")).toEqual(fixture.storage[0].content);
+	});
+
+	it("treats an authentication failure on a closing socket as a disconnect, not a failure", async () => {
+		await flush();
+		const frame = socket.frames.find(frame =>
+			frame.startsWith("MSG") && JSON.parse(frame.slice(15))["@type"] === "authenticate"
+		)!;
+		// The socket is already gone, but its close event has not been delivered yet.
+		socket.readyState = 3;
+		socket.reply(frame, {title: "Session closed", status: 503}, "NAK");
+		await flush();
+		expect(cube.connection.status).toBe("initializing");
+		socket.close();
+		await flush();
+		// The close handler owns this, so the client reconnects instead of reporting an error.
+		expect(cube.connection).toEqual({status: "disconnected"});
+	});
+
+	it("does not clear and dispatch a second time when the socket closes after close()", async () => {
+		await ready();
+		const compartments = vi.fn();
+		cube.addEventListener("compartments", compartments);
+		cube.close();
+		await flush();
+		expect(compartments).toHaveBeenCalledTimes(1);
 	});
 
 	it("rebuilds the connection after a transient failure instead of stranding the app in error", async () => {

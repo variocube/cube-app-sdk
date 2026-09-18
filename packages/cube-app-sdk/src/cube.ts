@@ -206,7 +206,10 @@ export class CubeImpl implements Cube {
 					receive();
 				}
 			}, error => {
-				if (generation === this.#generation) this.#fail(toCubeError(error));
+				// A socket that is already closing gets its reconnect from the close handler, which
+				// may not have run yet. Failing here would promote an ordinary disconnect to an error.
+				if (generation !== this.#generation || !this.#socketOpen) return;
+				this.#fail(toCubeError(error));
 			}).catch(error => this.#fail(toCubeError(error)));
 		};
 		this.#client.onClose = this.#handleClose;
@@ -314,7 +317,13 @@ export class CubeImpl implements Cube {
 		);
 		this.#on<OccupancyEndedMessage>("occupancyEnded", event => {
 			if (!this.#acceptExtension() || !this.#identity) return;
-			if (this.#occupancies) this.#setOccupancies(this.#occupancies.filter(o => o.uuid !== event.uuid));
+			// The other three lifecycle events are scoped by `occupancy.appId`, which an end does not
+			// carry. The snapshot is what attributes it; an end that cannot be attributed at all is
+			// still dispatched, rather than swallowing a real one.
+			if (this.#occupancies) {
+				if (!this.#occupancies.some(o => o.uuid === event.uuid)) return;
+				this.#setOccupancies(this.#occupancies.filter(o => o.uuid !== event.uuid));
+			}
 			this.#dispatchEvent("occupancyEnded", event);
 		});
 		this.#on<StorageItemMessage>("storageItem", event => {
@@ -630,6 +639,9 @@ export class CubeImpl implements Cube {
 
 	close() {
 		this.#unsubscribeSession();
+		// `stop()` notifies the close handler when the socket's own close event arrives, which would
+		// reset a second time and dispatch cleared state after the caller closed the cube.
+		this.#client.onClose = undefined;
 		this.#controllerConnected = false;
 		this.#reset({status: "disconnected"});
 		this.#client.stop();

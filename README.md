@@ -66,7 +66,9 @@ compartments boxes: `boxNumber` is a `Compartment.number`. Authorization is enfo
 returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown
 snapshot is never mistaken for an empty one. A local read can trail a just-acknowledged mutation until its publication
 arrives. Lifecycle events follow the controller's names: a confirmation arrives as `occupancyCreated`, a cancellation
-as `occupancyEnded`. `addEventListener` returns a function that removes the listener.
+as `occupancyEnded`. `addEventListener` returns a function that removes the listener. An end carries only a `uuid`,
+so the snapshot is what scopes it to the installed app: an end for a UUID this app does not hold is not dispatched,
+while one that cannot be attributed at all — no snapshot yet — is dispatched rather than swallowing a real end.
 
 Lost mutation replies produce `COMMAND_OUTCOME_UNKNOWN`. Reconcile a known UUID or handover reference with fresh
 controller publications; the SDK never replays mutations after disconnect, timeout or cancellation. Generation changes clear
