@@ -511,6 +511,10 @@ describe("commands and authentication", () => {
 	it("rejects incompatible authentication and bounded duplicate initial publications", async () => {
 		await authenticate(5);
 		expect(cube.connection).toMatchObject({status: "error", error: {code: "PROTOCOL_MISMATCH"}});
+		// One side needs new software, so repeating the same handshake cannot resolve it.
+		await vi.advanceTimersByTimeAsync(60000);
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "PROTOCOL_MISMATCH"}});
+		expect(Socket.instances).toHaveLength(1);
 	});
 	it("rejects duplicate initial publications while storage is loading", async () => {
 		await flush();
@@ -579,6 +583,67 @@ describe("commands and authentication", () => {
 		old.event({"@type": "storageItem", ...fixture.storage[0], content: "stale"});
 		await flush();
 		expect(cube.storage.get("json")).toEqual(fixture.storage[0].content);
+	});
+
+	it("rebuilds the connection after a transient failure instead of stranding the app in error", async () => {
+		await ready([occupancy()]);
+		// A malformed frame fails the connection, but a fresh socket can resolve it.
+		socket.event({"@type": "storageChunk", key: "bad", index: 0, total: 1, content: btoa("{BROKEN")});
+		await flush();
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "INVALID_RESPONSE"}});
+		expect(Socket.instances).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(10000);
+		expect(cube.connection.status).toBe("initializing");
+		socket = Socket.instances[1];
+		socket.open();
+		await ready([occupancy()]);
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.occupancies.list()).toEqual([occupancy()]);
+	});
+
+	it("does not retry a failure that needs a fresh kiosk launch", async () => {
+		await ready();
+		socket.event({"@type": "cube", ...identity("other")});
+		await flush();
+		await vi.advanceTimersByTimeAsync(60000);
+		expect(cube.connection).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
+		expect(Socket.instances).toHaveLength(1);
+	});
+
+	it("survives enum values a newer controller adds, dropping the value rather than the connection", async () => {
+		const locks = vi.fn();
+		const codes = vi.fn();
+		cube.addEventListener("lock", locks);
+		cube.addEventListener("code", codes);
+		await authenticate();
+		socket.event({
+			"@type": "initialState",
+			revision: 0,
+			generation: 1,
+			identity: identity(),
+			compartments: [{number: "1", enabled: true, types: ["S"], features: ["COOLED", "IRRADIATED"]}],
+			devices: [{id: "d1", types: ["Locking", "Telepathy"]}, {id: "d2", types: ["Telepathy"]}],
+			occupancies: [],
+		});
+		socket.revision = 0;
+		socket.event({"@type": "ready"});
+		await flush();
+		// Only the capability this app cannot name is dropped; the locker still connects.
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.compartments[0].features).toEqual(["COOLED"]);
+		expect(cube.devices).toEqual([{id: "d1", types: ["Locking"]}, {id: "d2", types: []}]);
+		// A scalar the app cannot interpret costs its own event, not the connection.
+		socket.event({"@type": "lock", lock: "lock-1", status: "MELTED"});
+		socket.event({"@type": "code", code: "1234", source: "TELEPATHY"});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(locks).not.toHaveBeenCalled();
+		expect(codes).not.toHaveBeenCalled();
+		socket.event({"@type": "lock", lock: "lock-1", status: "OPEN"});
+		socket.event({"@type": "code", code: "1234", source: "KEYPAD"});
+		await flush();
+		expect(locks).toHaveBeenCalledTimes(1);
+		expect(codes).toHaveBeenCalledTimes(1);
 	});
 
 	it("revokes cached state and uncertain commands when the installed app changes", async () => {

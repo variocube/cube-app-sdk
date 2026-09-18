@@ -21,30 +21,45 @@ export const occupancySchema = z.object({
 	action: text.nullable(),
 	state: z.enum(["pending", "confirmed", "ended"]),
 });
+const COMPARTMENT_FEATURES = ["COOLED", "ACCESSIBLE", "CHARGER", "DANGEROUS_GOODS"] as const;
+const DEVICE_TYPES = [
+	"NfcReader",
+	"PaymentTerminal",
+	"Locking",
+	"BarcodeReader",
+	"Admission",
+	"ComputeUnit",
+	"Kiosk",
+	"Keypad",
+	"DoorBell",
+	"PowerManagement",
+] as const;
+export const LOCK_STATUSES = ["OPEN", "CLOSED", "BREAKIN", "BLOCKED"] as const;
+export const CODE_SOURCES = ["KEYPAD", "SCANNER", "NFC"] as const;
+
+/**
+ * A newer controller may send values this app does not know yet, so unknown entries are dropped
+ * instead of failing the event. A closed list would let a controller-only rollout strand every
+ * installed app; the compartment or device still arrives, without the capability it cannot name.
+ * Scalar enums are validated in the handlers, which drop the single event rather than the message.
+ */
+function knownValues<T extends readonly string[]>(values: T) {
+	return z.array(text).transform(entries =>
+		entries.filter(entry => (values as readonly string[]).includes(entry)) as Array<T[number]>
+	);
+}
+
 const compartmentSchema = z.object({
 	number: text,
 	enabled: z.boolean(),
 	types: z.array(text),
-	features: z.array(z.enum(["COOLED", "ACCESSIBLE", "CHARGER", "DANGEROUS_GOODS"])),
+	features: knownValues(COMPARTMENT_FEATURES),
 	lock: text.optional(),
 	secondaryLock: text.optional(),
 });
 const deviceSchema = z.object({
 	id: text,
-	types: z.array(
-		z.enum([
-			"NfcReader",
-			"PaymentTerminal",
-			"Locking",
-			"BarcodeReader",
-			"Admission",
-			"ComputeUnit",
-			"Kiosk",
-			"Keypad",
-			"DoorBell",
-			"PowerManagement",
-		]),
-	),
+	types: knownValues(DEVICE_TYPES),
 	vendor: text.optional(),
 	model: text.optional(),
 	serialNumber: text.optional(),
@@ -91,11 +106,13 @@ export const eventSchemas: Record<string, z.ZodType> = {
 		content: z.string().max(65536),
 	}),
 	ready: z.object(boundary),
-	code: z.object({...boundary, code: text, source: z.enum(["KEYPAD", "SCANNER", "NFC"])}),
+	// `source` and `status` stay open here; the handlers drop events carrying a value this app
+	// does not know, so an added value costs one event instead of the whole connection.
+	code: z.object({...boundary, code: text, source: text}),
 	lock: z.object({
 		...boundary,
 		lock: text,
-		status: z.enum(["OPEN", "CLOSED", "BREAKIN", "BLOCKED"]),
+		status: text,
 		compartmentNumber: text.optional(),
 		actor: text.optional(),
 		action: text.optional(),

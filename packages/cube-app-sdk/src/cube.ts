@@ -21,7 +21,7 @@ import type {
 	StorageItemRemovedMessage,
 	WireBoundary,
 } from "./messages.js";
-import {eventSchemas, initialStateSchema, replySchema, storageSchema} from "./schema.js";
+import {CODE_SOURCES, eventSchemas, initialStateSchema, LOCK_STATUSES, replySchema, storageSchema} from "./schema.js";
 import {ControllerSessionImpl, PROTOCOL_MAJOR} from "./session.js";
 import type {
 	CodeReaderConfig,
@@ -53,6 +53,16 @@ const FEATURE_FLAGS: Record<CompartmentFeature, string> = {
 const STORAGE_ITEM_BYTES = 1048576 + 4096;
 const STORAGE_TOTAL_BYTES = 68 * 1048576;
 const STORAGE_CHUNK_BYTES = 48 * 1024;
+
+/**
+ * Failures a reconnect cannot resolve, because they need a fresh kiosk launch or new software on
+ * one side. Every other failure is transient — a slow snapshot, a malformed frame, a controller
+ * domain that dropped away — and is retried, so one bad moment does not strand the app until the
+ * kiosk relaunches it. The delay matches the VCMP client's own reconnect interval, which governs
+ * an ordinary socket loss, so a persistently broken controller is retried at that same pace.
+ */
+const FATAL_FAILURES = new Set(["AUTHENTICATION_REQUIRED", "PROTOCOL_MISMATCH"]);
+const RECOVERY_DELAY_MS = 10000;
 
 interface StorageAssembly {
 	key: string;
@@ -105,6 +115,7 @@ export class CubeImpl implements Cube {
 	#authenticationBytes = 0;
 	readonly #authenticationMessages: Array<() => void> = [];
 	#initialTimer: ReturnType<typeof setTimeout> | undefined;
+	#retryTimer: ReturnType<typeof setTimeout> | undefined;
 	#compartments: Compartment[] = [];
 	#devices: Device[] = [];
 	#identity: CubeIdentity | undefined;
@@ -198,10 +209,7 @@ export class CubeImpl implements Cube {
 				if (generation === this.#generation) this.#fail(toCubeError(error));
 			}).catch(error => this.#fail(toCubeError(error)));
 		};
-		this.#client.onClose = () => {
-			this.#controllerConnected = false;
-			this.#reset({status: "disconnected"});
-		};
+		this.#client.onClose = this.#handleClose;
 		this.#on<InitialStateMessage>("initialState", event => {
 			if (
 				!this.#authenticated || (this.#initialReceived && !this.connected)
@@ -272,8 +280,14 @@ export class CubeImpl implements Cube {
 			this.#devices = event.devices;
 			this.#dispatchEvent("devices", event);
 		});
-		this.#on<LockMessage>("lock", event => this.#dispatchEvent("lock", event));
-		this.#on<CodeMessage>("code", event => this.#dispatchEvent("code", event));
+		// A status or source a newer controller added is meaningless to this app, and the event is
+		// about that value, so the event is dropped rather than delivered under a type it violates.
+		this.#on<LockMessage>("lock", event => {
+			if (LOCK_STATUSES.includes(event.status)) this.#dispatchEvent("lock", event);
+		});
+		this.#on<CodeMessage>("code", event => {
+			if (CODE_SOURCES.includes(event.source)) this.#dispatchEvent("code", event);
+		});
 		this.#on<AvailabilityMessage>("availability", event => {
 			if (!event.connected) {
 				this.#fail(new CubeError(event.error?.code ?? "UNAVAILABLE", "Controller domain unavailable."));
@@ -392,6 +406,7 @@ export class CubeImpl implements Cube {
 		this.#initialReceived = false;
 		clearTimeout(this.#storageTimer);
 		clearTimeout(this.#initialTimer);
+		clearTimeout(this.#retryTimer);
 		this.#authenticated = false;
 		this.#authenticationPending = false;
 		this.#bufferedInitialState = false;
@@ -412,11 +427,27 @@ export class CubeImpl implements Cube {
 		if (wasReady) this.#dispatchEvent("close", {});
 	}
 
+	readonly #handleClose = () => {
+		this.#controllerConnected = false;
+		this.#reset({status: "disconnected"});
+	};
+
 	#fail(error: CubeError) {
+		// The retry below owns the reconnect cycle, so the client's own one is stopped either way.
 		this.#client.onClose = undefined;
 		this.#client.stop();
 		this.#controllerConnected = false;
-		this.#reset({status: error.code === "AUTHENTICATION_REQUIRED" ? "unavailable" : "error", error});
+		if (FATAL_FAILURES.has(error.code)) {
+			this.#reset({status: error.code === "AUTHENTICATION_REQUIRED" ? "unavailable" : "error", error});
+			return;
+		}
+		// Report the error, then rebuild the connection from a fresh socket. `#reset` cleared the
+		// timer this arms, so only the latest failure is retried.
+		this.#reset({status: "error", error});
+		this.#retryTimer = setTimeout(() => {
+			this.#client.onClose = this.#handleClose;
+			this.#resynchronize();
+		}, RECOVERY_DELAY_MS);
 	}
 
 	#resynchronize() {

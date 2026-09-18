@@ -33,6 +33,13 @@ an authoritative initial snapshot arrives. `cube.connection` / `useConnectionSta
 `initializing`, `ready`, `unavailable` (a fresh kiosk launch is required), and `error`. This is the only readiness model:
 `cube.connected`, the `open`/`close` events, local reads and every React hook follow it.
 
+`error` is not terminal. A failure a reconnect can resolve — a timed-out or malformed snapshot, a controller domain that
+dropped away — holds the reason on `connection.error` and rebuilds the connection from a fresh socket ten seconds later,
+so one bad moment does not strand the app until the kiosk relaunches it. Only `AUTHENTICATION_REQUIRED` (`unavailable`)
+and `PROTOCOL_MISMATCH` (`error`) stay put, because a fresh kiosk launch or new software is required. Values a newer
+controller adds to a closed list are dropped rather than failing: an unknown compartment feature or device type is
+omitted from that compartment or device, and an unknown lock status or code source drops its own event.
+
 Local API credentials renew 30 seconds before expiry. Backend app JWTs come from `cube.getToken()` and have the exact
 installed app audience. They are separate from local API credentials, Center identity proofs and technician sessions.
 Never persist or log credentials or business state. Reload loses memory credentials; kiosk's trusted launch monitor

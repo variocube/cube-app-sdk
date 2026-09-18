@@ -83,6 +83,9 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 - `cube.identity` (`cubeId`, `appId`) / `getToken()`: the token is never part of identity, events or hook results
 - `cube.connection`: the only readiness model (`disconnected`, `initializing`, `ready`, `unavailable`, `error`);
   `connected`, `open`/`close` and every hook follow it; unknown data is never represented as loaded-empty
+- `error` is recoverable: transient failures keep the reason and reconnect after 10s. Only `AUTHENTICATION_REQUIRED`
+  and `PROTOCOL_MISMATCH` are terminal. Enum values a newer controller adds are dropped (unknown feature/device type
+  omitted, unknown lock status/code source drops its event), never failed — a closed list would brick installed apps
 
 ## Code Style
 
