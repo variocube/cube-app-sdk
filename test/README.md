@@ -19,10 +19,11 @@ kiosk/controller acceptance record; headless Chromium does not establish it.
 
 ## Real native controller
 
-Download/build the matching controller 6 candidate and run:
+Download the matching controller 6 candidate, or build it in `controller-rs` with
+`cargo build --bin variocube-controller` (the binary is then `target/debug/variocube-controller`), and run:
 
 ```shell
-controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/sdk-controller
+variocube-controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/sdk-controller
 CONTROLLER_URL=http://localhost:9000 npm run test:controller
 ```
 
