@@ -27,3 +27,6 @@ export type {
 	TriggerTimingConfig,
 	ValidationResult,
 } from "@variocube/driver-common/barcode-reader/config";
+
+export { bootstrapSession, PROTOCOL_MAJOR } from "./session.js";
+export type { BootstrapOptions, ControllerSession } from "./session.js";

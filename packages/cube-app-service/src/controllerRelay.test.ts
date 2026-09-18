@@ -1,8 +1,9 @@
-import type {CapabilitiesMessage, CubeMessage, OccupanciesMessage, Occupancy} from "@variocube/cube-app-sdk";
+import type {CubeMessage, OccupanciesMessage, Occupancy} from "@variocube/cube-app-sdk";
 import {VcmpError, type VcmpMessage} from "@variocube/vcmp";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import fixture from "../../../test/fixtures/controller-wire.json";
 import {ControllerRelay, extensionCommands} from "./controllerRelay";
+import type {CapabilitiesMessage} from "./legacy";
 
 const capabilities: CapabilitiesMessage = {...fixture.capabilities, "@type": "capabilities"};
 const identity: CubeMessage = {

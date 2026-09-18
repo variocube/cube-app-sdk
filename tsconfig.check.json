@@ -2,10 +2,21 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node", "vite/client", "vitest/globals"],
+    "types": [
+      "node",
+      "vite/client",
+      "vitest/globals"
+    ],
     "paths": {
-      "@variocube/cube-app-sdk": ["./packages/cube-app-sdk/src/index.ts"],
-      "@variocube/cube-app-react-sdk": ["./packages/cube-app-react-sdk/src/index.tsx"]
+      "@variocube/cube-app-sdk": [
+        "./packages/cube-app-sdk/src/index.ts"
+      ],
+      "@variocube/cube-app-react-sdk": [
+        "./packages/cube-app-react-sdk/src/index.tsx"
+      ],
+      "@sdk/session": [
+        "./packages/cube-app-sdk/src/session.ts"
+      ]
     }
   },
   "include": [
