@@ -2,14 +2,12 @@ import {
 	AvailabilityState,
 	CodeEvent,
 	Compartment,
-	CompartmentsEvent,
 	connect,
 	ConnectOptions,
 	Cube,
 	CubeError,
 	CubeIdentity,
 	Device,
-	DevicesEvent,
 	EventListener,
 	LockEvent,
 	LockStatus,
@@ -68,18 +66,14 @@ function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 	const [locks, setLocks] = useState<Record<string, LockStatus>>({});
 
 	useEffect(() => {
-		const open = () => setConnected(true);
-		const close = () => setConnected(false);
-		const lock = ({lock, status}: LockEvent) => setLocks(prev => ({...prev, [lock]: status}));
-		const compartments = ({compartments}: CompartmentsEvent) => setCompartments(compartments);
-		const devices = ({devices}: DevicesEvent) => setDevices(devices);
-
 		const cube = connect({host, port, secondary});
-		cube.addEventListener("open", open);
-		cube.addEventListener("close", close);
-		cube.addEventListener("compartments", compartments);
-		cube.addEventListener("devices", devices);
-		cube.addEventListener("lock", lock);
+		const unsubscribe = [
+			cube.addEventListener("open", () => setConnected(true)),
+			cube.addEventListener("close", () => setConnected(false)),
+			cube.addEventListener("compartments", ({compartments}) => setCompartments(compartments)),
+			cube.addEventListener("devices", ({devices}) => setDevices(devices)),
+			cube.addEventListener("lock", ({lock, status}) => setLocks(prev => ({...prev, [lock]: status}))),
+		];
 		setConnected(cube.connected);
 		setCompartments(cube.compartments);
 		setDevices(cube.devices);
@@ -87,11 +81,7 @@ function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 		setCube(cube);
 
 		return () => {
-			cube.removeEventListener("open", open);
-			cube.removeEventListener("close", close);
-			cube.removeEventListener("compartments", compartments);
-			cube.removeEventListener("devices", devices);
-			cube.removeEventListener("lock", lock);
+			unsubscribe.forEach(remove => remove());
 			cube.close();
 		};
 	}, [host, port, secondary]);
@@ -179,10 +169,7 @@ export function useLocks() {
  */
 export function useCodeEvent(listener: EventListener<CodeEvent>) {
 	const cube = useCube();
-	useEffect(() => {
-		cube.addEventListener("code", listener);
-		return () => cube.removeEventListener("code", listener);
-	}, [cube, listener]);
+	useEffect(() => cube.addEventListener("code", listener), [cube, listener]);
 }
 
 /**
@@ -191,10 +178,7 @@ export function useCodeEvent(listener: EventListener<CodeEvent>) {
  */
 export function useLockEvent(listener: EventListener<LockEvent>) {
 	const cube = useCube();
-	useEffect(() => {
-		cube.addEventListener("lock", listener);
-		return () => cube.removeEventListener("lock", listener);
-	}, [cube, listener]);
+	useEffect(() => cube.addEventListener("lock", listener), [cube, listener]);
 }
 
 /** A JSON document read. JSON null is ready; a missing or deleted document is not-found. */
@@ -224,14 +208,12 @@ function useCubeSnapshot<T>(read: (cube: Cube) => T, subscribe: Subscription): T
 
 const readOccupancies = (cube: Cube) => cube.occupancies.state;
 const subscribeOccupancies: Subscription = (cube, listener) => {
-	cube.addEventListener("occupancies", listener);
-	cube.addEventListener("availability", listener);
-	cube.addEventListener("identity", listener);
-	return () => {
-		cube.removeEventListener("occupancies", listener);
-		cube.removeEventListener("availability", listener);
-		cube.removeEventListener("identity", listener);
-	};
+	const unsubscribe = [
+		cube.addEventListener("occupancies", listener),
+		cube.addEventListener("availability", listener),
+		cube.addEventListener("identity", listener),
+	];
+	return () => unsubscribe.forEach(remove => remove());
 };
 
 /** The controller's live, authoritative occupancy snapshot and its availability. */
@@ -250,13 +232,10 @@ export function useOccupancy(uuid: string): OccupancyResult {
 }
 
 const readIdentity = (cube: Cube) => cube.identity;
-const subscribeIdentity: Subscription = (cube, listener) => {
-	cube.addEventListener("identity", listener);
-	return () => cube.removeEventListener("identity", listener);
-};
+const subscribeIdentity: Subscription = (cube, listener) => cube.addEventListener("identity", listener);
 
 /** Current cube/app identity, including renewals; undefined while disconnected. */
-export function useCubeIdentity(): CubeIdentity | undefined {
+export function useIdentity(): CubeIdentity | undefined {
 	return useCubeSnapshot(readIdentity, subscribeIdentity);
 }
 
@@ -294,30 +273,25 @@ export function useStorageItem<T>(key: string): StorageItemResult<T> {
 				publish({status, error});
 			});
 		};
-		const storageChanged = ({key: changedKey}: { key: string }) => {
-			if (changedKey === key) refresh();
-		};
-		const availabilityChanged = () => {
-			if (availability !== cube.storage.state) refresh();
-		};
-		const identityChanged = () => {
-			const next = cube.identity;
-			if (identity?.cubeId !== next?.cubeId || identity?.appId !== next?.appId) refresh();
-		};
-		cube.addEventListener("storage", storageChanged);
-		cube.addEventListener("availability", availabilityChanged);
-		cube.addEventListener("identity", identityChanged);
-		cube.addEventListener("open", refresh);
-		cube.addEventListener("close", refresh);
+		const unsubscribe = [
+			cube.addEventListener("storage", ({key: changedKey}) => {
+				if (changedKey === key) refresh();
+			}),
+			cube.addEventListener("availability", () => {
+				if (availability !== cube.storage.state) refresh();
+			}),
+			cube.addEventListener("identity", () => {
+				const next = cube.identity;
+				if (identity?.cubeId !== next?.cubeId || identity?.appId !== next?.appId) refresh();
+			}),
+			cube.addEventListener("open", refresh),
+			cube.addEventListener("close", refresh),
+		];
 		refresh();
 		return () => {
 			active = false;
 			generation++;
-			cube.removeEventListener("storage", storageChanged);
-			cube.removeEventListener("availability", availabilityChanged);
-			cube.removeEventListener("identity", identityChanged);
-			cube.removeEventListener("open", refresh);
-			cube.removeEventListener("close", refresh);
+			unsubscribe.forEach(remove => remove());
 		};
 	}, [cube, key]);
 	return snapshot.cube === cube && snapshot.key === key ? snapshot.result : initialStorageResult<T>(cube);

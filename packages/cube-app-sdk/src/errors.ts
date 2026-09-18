@@ -6,10 +6,12 @@ export type CubeErrorCode =
 	| "UNSUPPORTED"
 	| "COMMAND_OUTCOME_UNKNOWN"
 	| "TIMEOUT"
+	| "INVALID_REQUEST"
 	| "INVALID_RESPONSE"
 	| "INVALID_CONTENT_TYPE"
 	| "STALE_RESPONSE"
-	| "COMMAND_FAILED";
+	| "COMMAND_FAILED"
+	| "INTERNAL_ERROR";
 
 /** A controller rejection or a local transport/availability failure. */
 export class CubeError extends Error {

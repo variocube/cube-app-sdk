@@ -150,7 +150,7 @@ try {
 	await cube.configureCodeReader({indicators: {beeper: {volume: 150}}});
 }
 catch (error) {
-	// Error: Invalid code reader configuration: indicators.beeper.volume must be between 0 and 100
+	// CubeError INVALID_REQUEST: Invalid code reader configuration: indicators.beeper.volume must be between 0 and 100
 }
 ```
 
@@ -259,7 +259,7 @@ within your app.
 ### Bring Your Own (Basic) Features
 
 Location codes, maintenance codes, and a settings menu remain app responsibilities. Compartment maintenance state
-can be changed with `cube.setBoxMaintenance(number, required)` or `cube.requireBoxMaintenance(number)`.
+can be changed with `cube.setCompartmentMaintenance(number, required)`.
 
 ## Occupancies
 
@@ -267,7 +267,7 @@ The controller resolves exactly one installed Center app. Requests never select 
 and mutations are scoped to that app; unknown and foreign UUIDs both return `NOT_FOUND`.
 
 ```typescript
-const occupancy = await cube.occupancies.occupyBox({
+const occupancy = await cube.occupancies.occupyCompartment({
 	boxNumber: "1",
 	accessCode: "12345",
 	content: {handoverId: "handover-123"},
@@ -281,10 +281,11 @@ const matches = await cube.occupancies.list("12345"); // Access code OR access k
 await cube.occupancies.end(occupancy.uuid, {content: {pickedUp: true}, merge: true});
 ```
 
-`occupy(request)` accepts either box or type allocation options. `occupyType({type, group?, ...})` also supports
-`cooled`, `accessible`, `dangerousGoods`, and `charger`. Both allocation methods retain access code/shape/keys,
-content, actor, and action. `update(uuid, options)` changes content with optional merge and actor/action;
-`changeAccess(uuid, options)` changes code/shape/keys and actor/action. `confirm(uuid, content?, merge?)`
+`occupyCompartment({boxNumber, ...})` allocates one specific compartment; `occupyType({type, group?, features?, ...})`
+lets the controller choose one, where `features` takes the same `CompartmentFeature` values as `Compartment.features`.
+The controller calls compartments boxes: `boxNumber` is a `Compartment.number`. Both allocation methods retain access
+code/shape/keys, content, actor, and action. `update(uuid, options)` changes content with optional merge and
+actor/action; `changeAccess(uuid, options)` changes code/shape/keys and actor/action. `confirm(uuid, {content?, merge?})`
 confirms a reservation; `cancel(uuid)` removes a pending reservation and leaves a confirmed occupancy unchanged.
 `end(uuid, options?)` also accepts the controller's grace period and actor/action options.
 
@@ -294,9 +295,12 @@ readable by `get(uuid)` until cleanup. Allocation replies contain the created re
 the controller commits. An ACK for `openLock` acknowledges the command; observe lock events for the door cycle.
 
 `cube.occupancies.state` exposes availability separately from data. A `ready` snapshot with `data: []` means loaded
-and empty. `loading`, `unavailable`, and `error` never establish absence. The `occupancies` event reports state
-changes; creation, confirmation, updates, and access changes upsert complete records, while ending/canceling removes
-them. Snapshots replace the array. Data is cleared on disconnect and direct app changes.
+and empty. `loading`, `unavailable`, and `error` never establish absence. The `occupancies` event carries
+`{occupancies: state}` on every change; creation, confirmation, updates, and access changes upsert complete records, while ending/canceling removes
+them. Snapshots replace the array. Data is cleared on disconnect and direct app changes. The lifecycle events follow
+the controller's names: a confirmation arrives as `occupancyCreated` and a cancellation as `occupancyEnded`.
+
+`addEventListener` returns a function that removes the listener; `CubeEventMap` types every event name and payload.
 
 The landed controller does not globally serialize concurrent snapshots and lifecycle notifications. The service
 preserves received order; when reconciling uncertain operations, read the controller again with `list()`/`get()`.
@@ -336,7 +340,7 @@ controller/app changes; never log bearer tokens.
 `cube.identity` is undefined while disconnected or awaiting a supported controller's identity. Once received, it
 contains `cubeId`, `appId`, `token`, and `expiresAt`
 (Unix epoch seconds). Unresolved app configuration leaves the last three fields null. Subscribe to `identity`
-or use `useCubeIdentity()` to follow changes and renewal. There is no separate `cube.app` or `app` event.
+or use `useIdentity()` to follow changes and renewal. There is no separate `cube.app` or `app` event.
 
 Backends verify signatures with registered cube public keys and the configured app audience. A cube token proves
 cube identity; the backend binds the subject to the request path and authorizes tenant/site through its own mapping.
@@ -345,7 +349,7 @@ The SDK does not act as a token verifier or infer tenant/user permissions.
 ## React hooks
 
 Use one `CubeProvider` for the application. `useOccupancies()`, `useOccupancy(uuid)`, `useStorageItem<T>(key)`,
-`useStorageValue<T>(key)`, and `useCubeIdentity()` share its connection. See the
+`useStorageValue<T>(key)`, and `useIdentity()` share its connection. See the
 [React SDK README](packages/cube-app-react-sdk/README.md) for typed results and examples.
 
 Storage reads refresh on mount, key changes, matching invalidations, reconnect, and installed-app changes.
@@ -369,6 +373,7 @@ Catch `CubeError` and inspect `code`:
 | `TIMEOUT`                 | A query did not reply in time; a new read can be issued.                                                     |
 | `STALE_RESPONSE`          | A document changed during its read; discard that result and read its current value.                          |
 | `INVALID_CONTENT_TYPE`    | `get<T>` was used for binary content; use `getBlob`.                                                         |
+| `INVALID_REQUEST`         | The request was rejected locally, e.g. an invalid code reader configuration.                                 |
 | `INVALID_RESPONSE`        | The controller returned a malformed value or an invalid/expired refreshed token.                             |
 | `COMMAND_FAILED`          | A legacy/generic rejection without a stable controller error code.                                           |
 

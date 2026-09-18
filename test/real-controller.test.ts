@@ -119,12 +119,16 @@ test("controller lifecycle, Center storage, identity and app isolation through t
 		content: {handover: "test-55"},
 	});
 	expect(pending).toMatchObject({appId: "e2e-app", boxNumber: "1", state: "pending"});
-	await eventually(() => expect(cube.occupancies.snapshot?.[0]?.uuid).toBe(pending.uuid));
+	await eventually(() => expect(cube.occupancies.state.data?.[0]?.uuid).toBe(pending.uuid));
 	await cube.occupancies.cancel(pending.uuid);
-	await eventually(() => expect(cube.occupancies.snapshot).toEqual([]));
+	await eventually(() => expect(cube.occupancies.state.data).toEqual([]));
 	await expect(cube.occupancies.get(pending.uuid)).rejects.toMatchObject({code: "NOT_FOUND"});
 
-	const occupied = await cube.occupancies.occupyBox({boxNumber: "1", accessCode: "12345", accessKeys: ["key-a"]});
+	const occupied = await cube.occupancies.occupyCompartment({
+		boxNumber: "1",
+		accessCode: "12345",
+		accessKeys: ["key-a"],
+	});
 	const lockStates: string[] = [];
 	cube.addEventListener("lock", event => lockStates.push(event.status));
 	await cube.openCompartment("1");
@@ -136,8 +140,8 @@ test("controller lifecycle, Center storage, identity and app isolation through t
 	});
 	expect(closed.ok).toBe(true);
 	await eventually(() => expect(lockStates).toContain("CLOSED"));
-	await cube.occupancies.confirm(occupied.uuid, {confirmed: true});
-	await eventually(() => expect(cube.occupancies.snapshot?.[0]?.state).toBe("confirmed"));
+	await cube.occupancies.confirm(occupied.uuid, {content: {confirmed: true}});
+	await eventually(() => expect(cube.occupancies.state.data?.[0]?.state).toBe("confirmed"));
 	await cube.occupancies.update(occupied.uuid, {content: {handover: "test-55"}, merge: true, actor: "test"});
 	await cube.occupancies.changeAccess(occupied.uuid, {accessCode: "67890", accessKeys: ["key-b"]});
 	expect((await cube.occupancies.list("key-b"))[0]?.uuid).toBe(occupied.uuid);
@@ -165,7 +169,7 @@ test("controller lifecycle, Center storage, identity and app isolation through t
 
 	await install("app-b");
 	await eventually(() => expect(cube.identity?.appId).toBe("app-b"));
-	await eventually(() => expect(cube.occupancies.snapshot).toEqual([]));
+	await eventually(() => expect(cube.occupancies.state.data).toEqual([]));
 	await expect(cube.occupancies.update(occupied.uuid, {content: {foreign: true}})).rejects.toMatchObject({
 		code: "NOT_FOUND",
 	});
@@ -176,11 +180,11 @@ test("controller lifecycle, Center storage, identity and app isolation through t
 	await install("e2e-app", "app-b");
 	await expect(cube.occupancies.list()).rejects.toMatchObject({code: "APP_NOT_CONFIGURED"});
 	await install("e2e-app");
-	await eventually(() => expect(cube.occupancies.snapshot?.[0]?.uuid).toBe(occupied.uuid));
+	await eventually(() => expect(cube.occupancies.state.data?.[0]?.uuid).toBe(occupied.uuid));
 	await cube.occupancies.end(occupied.uuid);
-	await eventually(() => expect(cube.occupancies.snapshot).toEqual([]));
-	await cube.setBoxMaintenance("1", true);
-	await cube.setBoxMaintenance("1", false);
+	await eventually(() => expect(cube.occupancies.state.data).toEqual([]));
+	await cube.setCompartmentMaintenance("1", true);
+	await cube.setCompartmentMaintenance("1", false);
 
 	// Loss of the Center link leaves the real controller authoritative and usable offline.
 	await store("offline", "application/json", utf8("{\"available\":true}"));

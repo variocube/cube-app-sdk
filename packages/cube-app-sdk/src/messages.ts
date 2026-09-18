@@ -12,9 +12,9 @@ import type {
 	OccupancyChangedEvent,
 	OccupancyContent,
 	OccupancyEndedEvent,
-	OccupyBox,
-	OccupyType,
-	StorageEvent,
+	OccupyCompartmentRequest,
+	OccupyOptions,
+	StorageChangedEvent,
 	UpdateOccupancyOptions,
 } from "./types.js";
 
@@ -101,15 +101,30 @@ export interface OccupancyEndedMessage extends VcmpMessage, OccupancyEndedEvent 
 	"@type": "occupancyEnded";
 }
 
-export interface StorageItemChangedMessage extends VcmpMessage, StorageEvent {
+export interface StorageItemChangedMessage extends VcmpMessage, StorageChangedEvent {
 	"@type": "storageItemChanged";
 }
 
-export interface OccupyTypeMessage extends VcmpMessage, OccupyType {
-	"@type": "occupyType";
+/** The wire envelope of a stored value, as replied to `getStorageItem`. */
+export interface StorageItem {
+	key: string;
+	contentType: string;
+	encoding: "json" | "base64";
+	content: unknown;
 }
 
-export interface OccupyBoxMessage extends VcmpMessage, OccupyBox {
+/** The controller takes required features as individual flags. */
+export interface OccupyTypeMessage extends VcmpMessage, OccupyOptions {
+	"@type": "occupyType";
+	type: string;
+	group?: string;
+	accessible?: boolean;
+	cooled?: boolean;
+	dangerousGoods?: boolean;
+	charger?: boolean;
+}
+
+export interface OccupyBoxMessage extends VcmpMessage, OccupyCompartmentRequest {
 	"@type": "occupyBox";
 }
 

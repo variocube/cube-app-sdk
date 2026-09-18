@@ -126,18 +126,28 @@ describe("controller wire contract", () => {
 			content: {handover: "h1"},
 			actor: "customer",
 			action: "dropoff",
+		};
+		const allocated = cube.occupancies.occupyType({
+			...request,
+			features: ["COOLED", "ACCESSIBLE", "CHARGER", "DANGEROUS_GOODS"],
+		});
+		expect(JSON.parse(socket.request("occupyType").slice(15))).toEqual({
+			"@type": "occupyType",
+			...request,
 			cooled: true,
 			accessible: true,
 			charger: true,
 			dangerousGoods: true,
-		};
-		const allocated = cube.occupancies.occupy(request);
-		expect(JSON.parse(socket.request("occupyType").slice(15))).toEqual({"@type": "occupyType", ...request});
+		});
 		socket.reply(socket.request("occupyType"), occupancy());
 		await expect(allocated).resolves.toEqual(occupancy());
 		const operations: Array<[string, Promise<unknown>, object]> = [
-			["occupyBox", cube.occupancies.occupy({boxNumber: "1", content: {}}), {boxNumber: "1", content: {}}],
-			["confirmOccupancy", cube.occupancies.confirm("one", {confirmed: true}, true), {
+			[
+				"occupyBox",
+				cube.occupancies.occupyCompartment({boxNumber: "1", content: {}}),
+				{boxNumber: "1", content: {}},
+			],
+			["confirmOccupancy", cube.occupancies.confirm("one", {content: {confirmed: true}, merge: true}), {
 				uuid: "one",
 				content: {confirmed: true},
 				merge: true,
@@ -170,7 +180,7 @@ describe("controller wire contract", () => {
 			socket.reply(frame, type === "occupyBox" ? occupancy() : undefined);
 			await promise;
 		}
-		const required = cube.requireBoxMaintenance("1");
+		const required = cube.setCompartmentMaintenance("1", true);
 		expect(JSON.parse(socket.request("updateBoxMaintenance").slice(15))).toEqual({
 			"@type": "updateBoxMaintenance",
 			boxNumber: "1",
@@ -178,7 +188,7 @@ describe("controller wire contract", () => {
 		});
 		socket.reply(socket.request("updateBoxMaintenance"));
 		await required;
-		const cleared = cube.setBoxMaintenance("1", false);
+		const cleared = cube.setCompartmentMaintenance("1", false);
 		expect(JSON.parse(socket.request("updateBoxMaintenance").slice(15)).maintenanceRequired).toBe(false);
 		socket.reply(socket.request("updateBoxMaintenance"));
 		await cleared;
@@ -207,13 +217,38 @@ describe("controller wire contract", () => {
 	});
 });
 
+describe("compartments", () => {
+	it("returns undefined for unknown compartments or locks and rejects opening them with NOT_FOUND", async () => {
+		await ready();
+		socket.event({
+			"@type": "compartments",
+			compartments: [{number: "1", enabled: true, types: [], features: [], lock: "lock-1"}, {
+				number: "2",
+				enabled: true,
+				types: [],
+				features: [],
+			}],
+		});
+		await flush();
+		expect(cube.getCompartmentLock("1")).toBe("lock-1");
+		expect(cube.getCompartmentLock("2")).toBeUndefined();
+		expect(cube.getCompartmentLock("missing")).toBeUndefined();
+		await expect(cube.openCompartment("2")).rejects.toMatchObject({code: "NOT_FOUND"});
+		await expect(cube.openCompartment("missing")).rejects.toMatchObject({code: "NOT_FOUND"});
+		await expect(cube.configureCodeReader({indicators: {beeper: {volume: 101}}})).rejects.toMatchObject({
+			code: "INVALID_REQUEST",
+		});
+	});
+});
+
 describe("authoritative state and invalidation", () => {
 	it("distinguishes loading from an empty snapshot and applies lifecycle/cancellation events", async () => {
 		expect(cube.occupancies.state).toEqual({status: "loading"});
 		const listener = vi.fn();
-		cube.addEventListener("occupancies", listener);
+		const removeListener = cube.addEventListener("occupancies", listener);
 		await ready();
 		expect(cube.occupancies.state).toEqual({status: "ready", data: []});
+		expect(listener).toHaveBeenLastCalledWith({occupancies: cube.occupancies.state});
 		for (
 			const [type, value] of [["occupancyCreated", occupancy()], [
 				"occupancyUpdated",
@@ -222,15 +257,15 @@ describe("authoritative state and invalidation", () => {
 		) {
 			socket.event({"@type": type, occupancy: value});
 			await flush();
-			expect(cube.occupancies.snapshot).toEqual([value]);
+			expect(cube.occupancies.state.data).toEqual([value]);
 		}
 		socket.event({"@type": "occupancyEnded", uuid: "one"});
 		await flush();
-		expect(cube.occupancies.snapshot).toEqual([]);
+		expect(cube.occupancies.state.data).toEqual([]);
 		socket.event({"@type": "occupancies", occupancies: [occupancy("replacement")]});
 		await flush();
-		expect(cube.occupancies.snapshot?.map(o => o.uuid)).toEqual(["replacement"]);
-		cube.removeEventListener("occupancies", listener);
+		expect(cube.occupancies.state.data?.map(o => o.uuid)).toEqual(["replacement"]);
+		removeListener();
 		const count = listener.mock.calls.length;
 		socket.event(fixture.emptySnapshot);
 		await flush();
@@ -267,7 +302,7 @@ describe("authoritative state and invalidation", () => {
 		await flush();
 		expect(cube.identity).toEqual(identity(null));
 		expect(cube.occupancies.state).toMatchObject({status: "unavailable", error: {code: "APP_NOT_CONFIGURED"}});
-		expect(cube.occupancies.snapshot).toBeUndefined();
+		expect(cube.occupancies.state.data).toBeUndefined();
 		const query = cube.occupancies.list();
 		const failure = expect(query).rejects.toMatchObject({
 			code: "APP_NOT_CONFIGURED",
@@ -328,7 +363,7 @@ describe("authoritative state and invalidation", () => {
 		await flush();
 		socket.reply(socket.request("getOccupancies"), []);
 		await list;
-		expect(cube.occupancies.snapshot).toEqual([occupancy()]);
+		expect(cube.occupancies.state.data).toEqual([occupancy()]);
 	});
 });
 
@@ -352,14 +387,16 @@ describe("connection, capabilities and unknown outcomes", () => {
 	it("does not route extension commands to a mock-only service", async () => {
 		socket.event({"@type": "availability", connected: false});
 		await flush();
-		await expect(cube.occupancies.occupyBox({boxNumber: "1"})).rejects.toMatchObject({code: "DISCONNECTED"});
+		await expect(cube.occupancies.occupyCompartment({boxNumber: "1"})).rejects.toMatchObject({
+			code: "DISCONNECTED",
+		});
 		await expect(cube.storage.keys()).rejects.toMatchObject({code: "DISCONNECTED"});
 		expect(socket.requests()).toHaveLength(0);
 	});
 
 	it("times out a sent mutation as unknown without replaying it, and queries as TIMEOUT", async () => {
 		await ready();
-		const mutation = cube.occupancies.occupyBox({boxNumber: "1", content: {handover: "reconcile-me"}});
+		const mutation = cube.occupancies.occupyCompartment({boxNumber: "1", content: {handover: "reconcile-me"}});
 		const unknown = expect(mutation).rejects.toMatchObject({code: "COMMAND_OUTCOME_UNKNOWN"});
 		const query = cube.storage.keys();
 		const timeout = expect(query).rejects.toMatchObject({code: "TIMEOUT"});
@@ -373,7 +410,7 @@ describe("connection, capabilities and unknown outcomes", () => {
 		await flush();
 		await ready([occupancy()]);
 		expect(socket.requests().filter(f => JSON.parse(f.slice(15))["@type"] === "occupyBox")).toHaveLength(1);
-		expect(cube.occupancies.snapshot).toEqual([occupancy()]);
+		expect(cube.occupancies.state.data).toEqual([occupancy()]);
 	});
 
 	it("treats a malformed ACK for a sent mutation as an unknown outcome", async () => {
@@ -392,7 +429,7 @@ describe("connection, capabilities and unknown outcomes", () => {
 		socket.close();
 		await unknown;
 		expect(cube.identity).toBeUndefined();
-		expect(cube.occupancies.snapshot).toBeUndefined();
+		expect(cube.occupancies.state.data).toBeUndefined();
 		expect(cube.occupancies.state.status).toBe("unavailable");
 		await vi.advanceTimersByTimeAsync(10000);
 		socket = Socket.instances[1];
@@ -402,7 +439,7 @@ describe("connection, capabilities and unknown outcomes", () => {
 		oldSocket.event({"@type": "cube", ...identity("old-app")});
 		await flush();
 		expect(cube.identity?.appId).toBe("app-a");
-		expect(cube.occupancies.snapshot).toEqual([]);
+		expect(cube.occupancies.state.data).toEqual([]);
 	});
 });
 
