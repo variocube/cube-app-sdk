@@ -2,9 +2,9 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import fixture from "../../../test/fixtures/controller-wire.json";
 import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
-import type {StorageItem} from "../src/messages.js";
-import {ControllerSession} from "../src/session.js";
-import type {CubeIdentity, Occupancy} from "../src/types.js";
+import type {CubeMessageIdentity, StorageItem} from "../src/messages.js";
+import {ControllerSessionImpl as ControllerSession} from "../src/session.js";
+import type {Occupancy} from "../src/types.js";
 
 class Socket {
 	static instances: Socket[] = [];
@@ -74,7 +74,7 @@ function token(appId = "app-a", seconds = 3600): string {
 	}.test-signature`;
 }
 
-function identity(appId: string | null = "app-a", seconds = 3600): CubeIdentity {
+function identity(appId: string | null = "app-a", seconds = 3600): CubeMessageIdentity {
 	return {
 		cubeId: "cube-1",
 		appId,
@@ -164,27 +164,36 @@ describe("pushed state and local reads", () => {
 		await authenticate();
 		initial([occupancy()]);
 		await flush();
-		expect(cube.state.status).toBe("initializing");
-		await expect(cube.storage.keys()).rejects.toMatchObject({code: "NOT_READY"});
+		expect(cube.connection.status).toBe("initializing");
+		expect(() => cube.storage.keys()).toThrow(expect.objectContaining({code: "NOT_READY"}));
 		for (const item of fixture.storage) socket.event({"@type": "storageItem", ...item});
 		socket.event({"@type": "ready"});
 		await flush();
-		expect(cube.state.status).toBe("ready");
-		await expect(cube.storage.keys()).resolves.toEqual(["binary", "json", "null"]);
-		await expect(cube.storage.get("json")).resolves.toEqual(fixture.storage[0].content);
-		await expect(cube.storage.get("null")).resolves.toBeNull();
-		const blob = await cube.storage.getBlob("binary");
-		expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([0, 255, 65]);
-		expect(await (await cube.storage.getBlob("null")).text()).toBe("null");
-		await expect(cube.storage.get("binary")).rejects.toMatchObject({code: "INVALID_CONTENT_TYPE"});
-		await expect(cube.storage.get("missing")).rejects.toMatchObject({code: "NOT_FOUND"});
-		await expect(cube.occupancies.get("missing")).rejects.toMatchObject({code: "NOT_FOUND"});
-		await expect(cube.occupancies.list("key")).resolves.toEqual([occupancy()]);
-		await expect(cube.occupancies.list("1234")).resolves.toEqual([occupancy()]);
-		await expect(cube.occupancies.list("other")).resolves.toEqual([]);
-		const copy = await cube.storage.get<{ value: number }>("json");
-		copy.value = 999;
-		await expect(cube.storage.get("json")).resolves.toEqual(fixture.storage[0].content);
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.storage.keys()).toEqual(["binary", "json", "null"]);
+		expect(cube.storage.get("json")).toEqual(fixture.storage[0].content);
+		expect(cube.storage.get("null")).toBeNull();
+		const blob = cube.storage.getBlob("binary");
+		expect([...new Uint8Array(await blob!.arrayBuffer())]).toEqual([0, 255, 65]);
+		expect(await cube.storage.getBlob("null")!.text()).toBe("null");
+		expect(cube.storage.getBlob("missing")).toBeUndefined();
+		expect(() => cube.storage.get("binary")).toThrow(expect.objectContaining({code: "INVALID_CONTENT_TYPE"}));
+		expect(cube.storage.get("missing")).toBeUndefined();
+		expect(cube.occupancies.get("missing")).toBeUndefined();
+		expect(cube.occupancies.list("key")).toEqual([occupancy()]);
+		expect(cube.occupancies.list("1234")).toEqual([occupancy()]);
+		expect(cube.occupancies.list("other")).toEqual([]);
+		const copy = cube.storage.get<{ value: number }>("json");
+		copy!.value = 999;
+		expect(cube.storage.get("json")).toEqual(fixture.storage[0].content);
+		expect(cube.storage.get("json", value => Object.keys(value as object))).toEqual(
+			Object.keys(fixture.storage[0].content as object),
+		);
+		expect(() =>
+			cube.storage.get("json", () => {
+				throw new CubeError("INVALID_RESPONSE", "rejected by the app's parser");
+			})
+		).toThrow(expect.objectContaining({code: "INVALID_RESPONSE"}));
 		expect(socket.requests()).toEqual([]);
 	});
 
@@ -198,7 +207,7 @@ describe("pushed state and local reads", () => {
 		} satisfies StorageItem;
 		chunks(value);
 		await flush();
-		await expect(cube.storage.get("large")).resolves.toEqual(value.content);
+		expect(cube.storage.get("large")).toEqual(value.content);
 		socket.event({
 			"@type": "storageItem",
 			key: "json",
@@ -208,8 +217,8 @@ describe("pushed state and local reads", () => {
 		});
 		socket.event({"@type": "storageItemRemoved", key: "large"});
 		await flush();
-		await expect(cube.storage.get("json")).resolves.toBeNull();
-		await expect(cube.storage.get("large")).rejects.toMatchObject({code: "NOT_FOUND"});
+		expect(cube.storage.get("json")).toBeNull();
+		expect(cube.storage.get("large")).toBeUndefined();
 		expect(socket.requests()).toEqual([]);
 	});
 
@@ -218,7 +227,7 @@ describe("pushed state and local reads", () => {
 		const command = cube.occupancies.end("one");
 		initial([occupancy("replacement")], socket.revision + 1);
 		await flush();
-		await expect(cube.storage.get("json")).rejects.toMatchObject({code: "NOT_READY"});
+		expect(() => cube.storage.get("json")).toThrow(expect.objectContaining({code: "NOT_READY"}));
 		socket.event({
 			"@type": "storageItem",
 			key: "new",
@@ -230,8 +239,8 @@ describe("pushed state and local reads", () => {
 		await flush();
 		socket.reply(socket.request("endOccupancy"));
 		await command;
-		await expect(cube.storage.keys()).resolves.toEqual(["new"]);
-		await expect(cube.occupancies.list()).resolves.toEqual([occupancy("replacement")]);
+		expect(cube.storage.keys()).toEqual(["new"]);
+		expect(cube.occupancies.list()).toEqual([occupancy("replacement")]);
 	});
 
 	it("applies lifecycle upserts and removals before subsequent local reads", async () => {
@@ -239,12 +248,12 @@ describe("pushed state and local reads", () => {
 		for (const type of ["occupancyCreated", "occupancyUpdated", "occupancyAccessChanged"]) {
 			socket.event({"@type": type, occupancy: occupancy("one", {content: {type}})});
 			await flush();
-			await expect(cube.occupancies.get("one")).resolves.toMatchObject({content: {type}});
+			expect(cube.occupancies.get("one")).toMatchObject({content: {type}});
 		}
 		socket.event({"@type": "occupancyEnded", uuid: "one"});
 		await flush();
-		await expect(cube.occupancies.list()).resolves.toEqual([]);
-		await expect(cube.occupancies.get("one")).rejects.toMatchObject({code: "NOT_FOUND"});
+		expect(cube.occupancies.list()).toEqual([]);
+		expect(cube.occupancies.get("one")).toBeUndefined();
 	});
 
 	it.each(["duplicate", "out of order", "wrong key", "oversized", "truncated"])(
@@ -261,8 +270,9 @@ describe("pushed state and local reads", () => {
 			if (kind === "oversized") socket.event({...part, index: 1, content: btoa("x".repeat(48 * 1024 + 1))});
 			if (kind === "truncated") socket.event({"@type": "ready"});
 			await flush();
-			expect(cube.state.status).toBe("error");
-			await expect(cube.storage.get("key")).rejects.toMatchObject({code: "DISCONNECTED"});
+			expect(cube.connection.status).toBe("error");
+			// Reads report why the connection failed, not a generic disconnect.
+			expect(() => cube.storage.get("key")).toThrow(expect.objectContaining({code: "INVALID_RESPONSE"}));
 		},
 	);
 
@@ -272,7 +282,7 @@ describe("pushed state and local reads", () => {
 		socket.event({"@type": "storageChunk", key: "key", index: 0, total: 2, content: btoa("{")});
 		await flush();
 		await vi.advanceTimersByTimeAsync(10000);
-		expect(cube.state).toMatchObject({status: "error", error: {code: "TIMEOUT"}});
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "TIMEOUT"}});
 	});
 
 	it("retains more than the former 128 cached values and rejects oversized values without partial readiness", async () => {
@@ -287,8 +297,8 @@ describe("pushed state and local reads", () => {
 				}) satisfies StorageItem,
 		);
 		await ready([], items);
-		await expect(cube.storage.keys()).resolves.toHaveLength(150);
-		await expect(cube.storage.get("k0")).resolves.toBe(0);
+		expect(cube.storage.keys()).toHaveLength(150);
+		expect(cube.storage.get("k0")).toBe(0);
 		socket.event({
 			"@type": "storageItem",
 			key: "oversize",
@@ -297,7 +307,7 @@ describe("pushed state and local reads", () => {
 			content: "x".repeat(1048576 + 4096),
 		});
 		await flush();
-		expect(cube.state).toMatchObject({status: "error", error: {code: "LIMIT_EXCEEDED"}});
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "LIMIT_EXCEEDED"}});
 	});
 
 	it("redacts malformed serialized storage and rejects inconsistent chunk keys", async () => {
@@ -310,28 +320,55 @@ describe("pushed state and local reads", () => {
 			content: btoa("{\"private\":\"sensitive-payload\" BROKEN}"),
 		});
 		await flush();
-		expect(cube.state).toMatchObject({status: "error", error: {code: "INVALID_RESPONSE"}});
-		expect(cube.state.error?.message).not.toContain("sensitive-payload");
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "INVALID_RESPONSE"}});
+		expect(cube.connection.error?.message).not.toContain("sensitive-payload");
 	});
 
-	it("clears cached data on disconnect before asynchronous reads settle", async () => {
+	it("clears cached data on close; reads throw and a pending token read rejects", async () => {
 		await ready([occupancy()]);
-		const reads = [
-			cube.storage.get("json"),
-			cube.storage.keys(),
-			cube.occupancies.list(),
-			cube.occupancies.get("one"),
-			cube.getToken(),
-		];
-		const failures = reads.map(read => expect(read).rejects.toMatchObject({code: "DISCONNECTED"}));
+		const listener = vi.fn();
+		cube.addEventListener("occupancies", listener);
+		const pendingToken = expect(cube.getToken()).rejects.toMatchObject({code: "DISCONNECTED"});
 		cube.close();
-		await Promise.all(failures);
+		await pendingToken;
+		expect(listener).toHaveBeenLastCalledWith({occupancies: undefined});
 		expect(cube.identity).toBeUndefined();
-		expect(cube.occupancies.state.data).toBeUndefined();
+		for (
+			const read of [
+				() => cube.storage.get("json"),
+				() => cube.storage.getBlob("json"),
+				() => cube.storage.keys(),
+				() => cube.occupancies.list(),
+				() => cube.occupancies.get("one"),
+			]
+		) expect(read).toThrow(expect.objectContaining({code: "DISCONNECTED"}));
 	});
 });
 
 describe("commands and authentication", () => {
+	it("returns undefined for unknown compartments or locks and rejects opening them with NOT_FOUND", async () => {
+		await ready();
+		socket.event({
+			"@type": "compartments",
+			compartments: [{number: "1", enabled: true, types: [], features: [], lock: "lock-1"}, {
+				number: "2",
+				enabled: true,
+				types: [],
+				features: [],
+			}],
+		});
+		await flush();
+		expect(cube.getCompartmentLock("1")).toBe("lock-1");
+		expect(cube.getCompartmentLock("2")).toBeUndefined();
+		expect(cube.getCompartmentLock("missing")).toBeUndefined();
+		await expect(cube.openCompartment("2")).rejects.toMatchObject({code: "NOT_FOUND"});
+		await expect(cube.openCompartment("missing")).rejects.toMatchObject({code: "NOT_FOUND"});
+		await expect(cube.configureCodeReader({indicators: {beeper: {volume: 101}}})).rejects.toMatchObject({
+			code: "INVALID_REQUEST",
+		});
+		expect(socket.requests()).toEqual([]);
+	});
+
 	it("preserves complete occupancies and exact mutation option names", async () => {
 		await ready();
 		const request = {
@@ -468,19 +505,19 @@ describe("commands and authentication", () => {
 		expect(cube.identity).toBeUndefined();
 		await expect(cube.openLock("one")).rejects.toMatchObject({code: "NOT_READY"});
 		await authenticate();
-		expect(cube.state.status).toBe("ready");
+		expect(cube.connection.status).toBe("ready");
 	});
 
 	it("rejects incompatible authentication and bounded duplicate initial publications", async () => {
 		await authenticate(5);
-		expect(cube.state).toMatchObject({status: "error", error: {code: "PROTOCOL_MISMATCH"}});
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "PROTOCOL_MISMATCH"}});
 	});
 	it("rejects duplicate initial publications while storage is loading", async () => {
 		await flush();
 		initial();
 		initial();
 		await flush();
-		expect(cube.state).toMatchObject({status: "error", error: {code: "LIMIT_EXCEEDED"}});
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "LIMIT_EXCEEDED"}});
 	});
 
 	it("accepts a repeated ready barrier without announcing another connection", async () => {
@@ -492,19 +529,56 @@ describe("commands and authentication", () => {
 		expect(opened).toHaveBeenCalledTimes(1);
 	});
 
+	it("has one readiness model: connected, open/close and the connection event all follow status ready", async () => {
+		const events: string[] = [];
+		cube.addEventListener("open", () => events.push("open"));
+		cube.addEventListener("close", () => events.push("close"));
+		cube.addEventListener("connection", ({connection}) => events.push(connection.status));
+		await authenticate();
+		initial();
+		await flush();
+		// An open socket with an incomplete snapshot is not a connection yet.
+		expect(cube.connected).toBe(false);
+		socket.event({"@type": "ready"});
+		await flush();
+		expect(cube.connected).toBe(true);
+		// Ordinary publications advance the wire revision without touching the public connection state.
+		socket.event({"@type": "lock", lock: "lock-1", status: "OPEN"});
+		socket.event({"@type": "cube", ...identity("app-a", 250)});
+		await flush();
+		expect(events).toEqual(["ready", "open"]);
+		// A failure leaves ready exactly once, with the reason on the connection.
+		socket.event({"@type": "cube", ...identity("other")});
+		await flush();
+		expect(cube.connected).toBe(false);
+		expect(events).toEqual(["ready", "open", "unavailable", "close"]);
+	});
+
+	it("keeps the token out of identity and does not announce rotations as identity changes", async () => {
+		const identities = vi.fn();
+		cube.addEventListener("identity", identities);
+		await ready();
+		expect(cube.identity).toEqual({cubeId: "cube-1", appId: "app-a"});
+		expect(identities).toHaveBeenCalledTimes(1);
+		socket.event({"@type": "cube", ...identity("app-a", 250)});
+		await flush();
+		expect(identities).toHaveBeenCalledTimes(1);
+		expect(JSON.stringify(identities.mock.calls)).not.toContain("signature");
+	});
+
 	it("resynchronizes revision gaps and discards closed-socket state", async () => {
 		await ready([occupancy()]);
 		const old = socket;
 		socket.event({"@type": "occupancyEnded", uuid: "one", revision: 99});
 		await flush();
-		expect(cube.state.status).toBe("initializing");
-		expect(cube.occupancies.state.data).toBeUndefined();
+		expect(cube.connection.status).toBe("initializing");
+		expect(() => cube.occupancies.list()).toThrow(expect.objectContaining({code: "NOT_READY"}));
 		socket = Socket.instances[1];
 		socket.open();
 		await ready();
 		old.event({"@type": "storageItem", ...fixture.storage[0], content: "stale"});
 		await flush();
-		await expect(cube.storage.get("json")).resolves.toEqual(fixture.storage[0].content);
+		expect(cube.storage.get("json")).toEqual(fixture.storage[0].content);
 	});
 
 	it("revokes cached state and uncertain commands when the installed app changes", async () => {
@@ -515,7 +589,7 @@ describe("commands and authentication", () => {
 		await flush();
 		await failure;
 		expect(cube.identity).toBeUndefined();
-		expect(cube.state).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
+		expect(cube.connection).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
 	});
 });
 

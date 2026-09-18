@@ -28,5 +28,5 @@ export type {
 	ValidationResult,
 } from "@variocube/driver-common/barcode-reader/config";
 
-export { bootstrapController, ControllerSession, PROTOCOL_MAJOR } from "./session.js";
-export type { BootstrapOptions } from "./session.js";
+export { bootstrapSession, PROTOCOL_MAJOR } from "./session.js";
+export type { BootstrapOptions, ControllerSession } from "./session.js";

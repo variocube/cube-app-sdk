@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
-import {bootstrapController} from "@variocube/cube-app-sdk";
+import {bootstrapSession} from "@variocube/cube-app-sdk";
 
 // Clean the bootstrap fragment before loading React, router or application dependencies.
-void bootstrapController({
+void bootstrapSession({
 	endpoint: import.meta.env.VITE_CONTROLLER_SAME_ORIGIN === "true" ? location.origin : undefined,
 }).then(async session => {
 	const {renderApp} = await import("./app");

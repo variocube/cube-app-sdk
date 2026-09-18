@@ -60,13 +60,13 @@ export interface CodeEvent {
 }
 
 /**
- * An event that is dispatched when the connection to the locker is opened.
+ * An event that is dispatched when the connection becomes ready (`cube.connected` turns true).
  */
 export interface OpenEvent {
 }
 
 /**
- * An event that is dispatched when the connection to the locker was closed.
+ * An event that is dispatched when the connection stops being ready (`cube.connected` turns false).
  */
 export interface CloseEvent {
 }
@@ -176,26 +176,25 @@ export interface OpenContext {
 /** An event listener */
 export type EventListener<E> = (event: E) => unknown;
 
-export type AvailabilityStatus = "loading" | "ready" | "unavailable" | "error";
+/**
+ * - `disconnected`: no socket; the SDK reconnects by itself.
+ * - `initializing`: authenticating, or receiving the initial snapshot and storage.
+ * - `ready`: authenticated and completely loaded. Reads and commands only work in this status.
+ * - `unavailable`: a fresh kiosk launch is required; this connection will not recover.
+ * - `error`: the connection failed for the reason in `error` and was stopped.
+ */
+export type ConnectionStatus = "disconnected" | "initializing" | "ready" | "unavailable" | "error";
 
-export interface AvailabilityState {
-	status: AvailabilityStatus;
-	error?: CubeError;
-}
-
+/** The only readiness model: identity, occupancies and storage are all loaded exactly when status is `ready`. */
 export interface ConnectionState {
-	status: "disconnected" | "initializing" | "ready" | "unavailable" | "error";
-	generation?: number;
-	revision?: number;
+	status: ConnectionStatus;
 	error?: CubeError;
 }
 
-/** The controller chooses appId and token audience. expiresAt is Unix epoch seconds. */
+/** The controller resolves the cube and the single installed app. The app token is only available via `getToken()`. */
 export interface CubeIdentity {
 	cubeId: string;
-	appId: string | null;
-	token: string | null;
-	expiresAt: number | null;
+	appId: string;
 }
 
 export type OccupancyContent = Record<string, unknown>;
@@ -263,14 +262,11 @@ export interface EndOccupancyOptions extends UpdateOccupancyOptions {
 	gracePeriod?: number;
 }
 
-export interface OccupancyState extends AvailabilityState {
-	/** Undefined until an authoritative snapshot is available, including after disconnect/app changes. */
-	data?: Occupancy[];
-}
-
+/**
+ * Mutations go to the controller. Reads are synchronous and served from the pushed snapshot; they throw a
+ * `CubeError` unless the connection is `ready`, so unknown data is never mistaken for empty or absent.
+ */
 export interface Occupancies {
-	/** The live snapshot (`state.data`) and its availability. */
-	readonly state: OccupancyState;
 	occupyType(request: OccupyTypeRequest): Promise<Occupancy>;
 	occupyCompartment(request: OccupyCompartmentRequest): Promise<Occupancy>;
 	confirm(uuid: string, options?: ConfirmOccupancyOptions): Promise<void>;
@@ -278,22 +274,35 @@ export interface Occupancies {
 	update(uuid: string, options: UpdateOccupancyOptions): Promise<void>;
 	changeAccess(uuid: string, options: ChangeOccupancyAccessOptions): Promise<void>;
 	end(uuid: string, options?: EndOccupancyOptions): Promise<void>;
-	/** Reads the latest pushed snapshot, optionally matching accessCode or an access key. */
-	list(access?: string): Promise<Occupancy[]>;
-	get(uuid: string): Promise<Occupancy>;
+	/** The current occupancies, optionally only those matching an access code or access key. */
+	list(access?: string): Occupancy[];
+	/** The occupancy, or undefined if the snapshot has none with this UUID. */
+	get(uuid: string): Occupancy | undefined;
 }
 
-/** Controller-backed, Center-write-only storage. No browser persistence is used. */
+/**
+ * Controller-backed, Center-write-only storage; no browser persistence is used. Reads are synchronous and served
+ * from the pushed snapshot; they throw a `CubeError` unless the connection is `ready`.
+ */
 export interface CubeStorage {
-	readonly state: AvailabilityState;
-	/** Reads JSON, preserving JSON null. Missing/deleted documents reject with NOT_FOUND. */
-	get<T>(key: string): Promise<T>;
-	getBlob(key: string): Promise<Blob>;
-	keys(): Promise<string[]>;
+	/**
+	 * Reads a JSON value, or undefined if the key is missing or deleted. A stored JSON null is returned as null.
+	 * Pass `parse` (e.g. a Zod schema's `parse`) to validate the value instead of asserting its type.
+	 * @throws CubeError `INVALID_CONTENT_TYPE` if the value is binary; use `getBlob`.
+	 */
+	get<T = unknown>(key: string, parse?: (value: unknown) => T): T | undefined;
+	/** Reads a value with its content type, or undefined if the key is missing or deleted. */
+	getBlob(key: string): Blob | undefined;
+	keys(): string[];
 }
 
+/** The cube or installed app changed. Token rotations do not dispatch this event. */
 export interface IdentityEvent {
 	identity: CubeIdentity | undefined;
+}
+
+export interface ConnectionEvent {
+	connection: ConnectionState;
 }
 
 /** A storage key was written or deleted; read it again. Not the DOM `StorageEvent`. */
@@ -301,13 +310,9 @@ export interface StorageChangedEvent {
 	key: string;
 }
 
+/** The snapshot changed; undefined when it was cleared because the connection is no longer ready. */
 export interface OccupanciesEvent {
-	occupancies: OccupancyState;
-}
-
-export interface AvailabilityEvent {
-	occupancies: OccupancyState;
-	storage: AvailabilityState;
+	occupancies: Occupancy[] | undefined;
 }
 
 /**
@@ -331,11 +336,10 @@ export interface CubeEventMap {
 	code: CodeEvent;
 	compartments: CompartmentsEvent;
 	devices: DevicesEvent;
-	occupancies: OccupanciesEvent;
+	connection: ConnectionEvent;
 	identity: IdentityEvent;
+	occupancies: OccupanciesEvent;
 	storage: StorageChangedEvent;
-	state: ConnectionState;
-	availability: AvailabilityEvent;
 	occupancyCreated: OccupancyChangedEvent;
 	occupancyUpdated: OccupancyChangedEvent;
 	occupancyAccessChanged: OccupancyChangedEvent;
@@ -345,9 +349,13 @@ export interface CubeEventMap {
 export interface Cube {
 	readonly occupancies: Occupancies;
 	readonly storage: CubeStorage;
+	/** Undefined unless the connection is ready. */
 	readonly identity: CubeIdentity | undefined;
-	readonly state: ConnectionState;
-	/** Reads the current pushed token for the installed app; rejects expired tokens. Never sends a refresh request. */
+	readonly connection: ConnectionState;
+	/**
+	 * The current backend token for the installed app. Call it immediately before each backend request; never
+	 * keep, log or render the result. Rejects unless a valid, unexpired token has been pushed by the controller.
+	 */
 	getToken(): Promise<string>;
 	/** Marks a compartment as requiring maintenance, or clears the mark. */
 	setCompartmentMaintenance(compartmentNumber: string, required: boolean): Promise<void>;
@@ -415,7 +423,7 @@ export interface Cube {
 	secondary: boolean;
 
 	/**
-	 * Whether the connection to the cube app service is currently open.
+	 * Whether the connection is ready; shorthand for `connection.status === "ready"`.
 	 */
 	connected: boolean;
 

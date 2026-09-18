@@ -7,45 +7,37 @@ import type {
 	CompartmentsMessage,
 	CubeMessage,
 	DevicesMessage,
+	InitialStateMessage,
 	LockMessage,
 	OccupanciesMessage,
 	OccupancyAccessChangedMessage,
 	OccupancyCreatedMessage,
 	OccupancyEndedMessage,
 	OccupancyUpdatedMessage,
+	ReadyMessage,
 	StorageChunkMessage,
 	StorageItem,
 	StorageItemMessage,
 	StorageItemRemovedMessage,
+	WireBoundary,
 } from "./messages.js";
 import {eventSchemas, initialStateSchema, replySchema, storageSchema} from "./schema.js";
-import {ControllerSession, PROTOCOL_MAJOR} from "./session.js";
+import {ControllerSessionImpl, PROTOCOL_MAJOR} from "./session.js";
 import type {
-	AvailabilityEvent,
-	AvailabilityState,
-	CloseEvent,
-	CodeEvent,
 	CodeReaderConfig,
 	Compartment,
 	CompartmentFeature,
-	CompartmentsEvent,
 	ConnectionState,
 	Cube,
 	CubeEventMap,
 	CubeIdentity,
 	CubeStorage,
 	Device,
-	DevicesEvent,
 	EventListener,
-	IdentityEvent,
-	LockEvent,
 	Occupancies,
 	Occupancy,
 	OccupancyChangedEvent,
-	OccupancyEndedEvent,
-	OccupancyState,
 	OpenContext,
-	OpenEvent,
 } from "./types.js";
 
 type ListenerRegistry = { [E in keyof CubeEventMap]: Array<EventListener<CubeEventMap[E]>> };
@@ -71,12 +63,11 @@ interface StorageAssembly {
 
 interface PendingRequest {
 	sent: boolean;
-	mutation: boolean;
 	reject(error: CubeError): void;
 }
 
 export interface CubeImplOptions {
-	session: ControllerSession;
+	session: ControllerSessionImpl;
 	secondary?: boolean;
 }
 
@@ -91,8 +82,7 @@ export class CubeImpl implements Cube {
 		occupancies: [],
 		identity: [],
 		storage: [],
-		state: [],
-		availability: [],
+		connection: [],
 		occupancyCreated: [],
 		occupancyUpdated: [],
 		occupancyAccessChanged: [],
@@ -100,15 +90,13 @@ export class CubeImpl implements Cube {
 	};
 	readonly #client: VcmpClient;
 	#secondary = false;
-	readonly #session: ControllerSession;
 	readonly #unsubscribeSession: () => void;
-	#storageAvailable = false;
 	#initialReceived = false;
 	#storageBytes = 0;
 	#storageAssembly: StorageAssembly | undefined;
 	#storageTimer: ReturnType<typeof setTimeout> | undefined;
 	readonly #storageSizes = new Map<string, number>();
-	#state: ConnectionState = {status: "disconnected"};
+	#connection: ConnectionState = {status: "disconnected"};
 	#wireGeneration: number | undefined;
 	#wireRevision = 0;
 	#authenticated = false;
@@ -120,77 +108,74 @@ export class CubeImpl implements Cube {
 	#compartments: Compartment[] = [];
 	#devices: Device[] = [];
 	#identity: CubeIdentity | undefined;
+	#token: { token: string; expiresAt: number } | undefined;
 	#controllerConnected: boolean | undefined;
 	#generation = 0;
-	#occupancyState: OccupancyState = {status: "unavailable", error: disconnected()};
-	#storageState: AvailabilityState = {status: "unavailable", error: disconnected()};
+	#occupancies: Occupancy[] | undefined;
 	readonly #pending = new Set<PendingRequest>();
 	readonly #storageItems = new Map<string, StorageItem>();
 	readonly occupancies: Occupancies;
 	readonly storage: CubeStorage;
 
 	constructor(options: CubeImplOptions) {
-		this.#session = options.session;
 		this.#secondary = options.secondary ?? false;
-		const cube = this;
 		this.occupancies = {
-			get state() {
-				return cube.#occupancyState;
-			},
 			occupyType: ({features, ...request}) => {
 				const flags = Object.fromEntries((features ?? []).map(feature => [FEATURE_FLAGS[feature], true]));
-				return this.#request({"@type": "occupyType", ...request, ...flags}, true);
+				return this.#request({"@type": "occupyType", ...request, ...flags});
 			},
-			occupyCompartment: request => this.#request({"@type": "occupyBox", ...request}, true),
-			confirm: (uuid, options) => this.#request({"@type": "confirmOccupancy", uuid, ...options}, true),
-			cancel: uuid => this.#request({"@type": "cancelOccupancy", uuid}, true),
-			update: (uuid, options) => this.#request({"@type": "updateOccupancy", uuid, ...options}, true),
-			changeAccess: (uuid, options) => this.#request({"@type": "changeOccupancyAccess", uuid, ...options}, true),
-			end: (uuid, options) => this.#request({"@type": "endOccupancy", uuid, ...options}, true),
-			list: access => this.#listOccupancies(access),
-			get: uuid =>
-				this.#localRead(() => {
-					const occupancy = this.#occupancyState.data?.find(item => item.uuid === uuid);
-					if (!occupancy) throw new CubeError("NOT_FOUND", "Occupancy not found in the current snapshot.");
-					return structuredClone(occupancy);
-				}),
+			occupyCompartment: request => this.#request({"@type": "occupyBox", ...request}),
+			confirm: (uuid, options) => this.#request({"@type": "confirmOccupancy", uuid, ...options}),
+			cancel: uuid => this.#request({"@type": "cancelOccupancy", uuid}),
+			update: (uuid, options) => this.#request({"@type": "updateOccupancy", uuid, ...options}),
+			changeAccess: (uuid, options) => this.#request({"@type": "changeOccupancyAccess", uuid, ...options}),
+			end: (uuid, options) => this.#request({"@type": "endOccupancy", uuid, ...options}),
+			list: access =>
+				structuredClone(
+					this.#readOccupancies().filter(occupancy =>
+						access === undefined || occupancy.accessCode === access || occupancy.accessKeys.includes(access)
+					),
+				),
+			get: uuid => structuredClone(this.#readOccupancies().find(occupancy => occupancy.uuid === uuid)),
 		};
 		this.storage = {
-			get state() {
-				return cube.#storageState;
+			get: <T>(key: string, parse?: (value: unknown) => T) => {
+				const item = this.#readStorage(key);
+				if (!item) return undefined;
+				if (item.encoding !== "json") {
+					throw new CubeError("INVALID_CONTENT_TYPE", `Storage item ${key} is not JSON; use getBlob().`);
+				}
+				const content = structuredClone(item.content);
+				return parse ? parse(content) : content as T;
 			},
-			get: <T>(key: string): Promise<T> =>
-				this.#withStorage(key, item => {
-					if (item.encoding !== "json") {
-						throw new CubeError("INVALID_CONTENT_TYPE", `Storage item ${key} is not JSON; use getBlob().`);
-					}
-					return item.content as T;
-				}),
-			getBlob: key =>
-				this.#withStorage(key, item => {
-					const data = item.encoding === "json"
-						? JSON.stringify(item.content)
-						: Uint8Array.from(atob(item.content as string), character => character.charCodeAt(0));
-					return new Blob([data], {type: item.contentType});
-				}),
-			keys: () => this.#localRead(() => [...this.#storageItems.keys()].sort()),
+			getBlob: key => {
+				const item = this.#readStorage(key);
+				if (!item) return undefined;
+				const data = item.encoding === "json"
+					? JSON.stringify(item.content)
+					: Uint8Array.from(atob(item.content as string), character => character.charCodeAt(0));
+				return new Blob([data], {type: item.contentType});
+			},
+			keys: () => {
+				this.#assertReady();
+				return [...this.#storageItems.keys()].sort();
+			},
 		};
 		this.#client = new VcmpClient(options.session.webSocketUrl, {autoStart: false});
 		this.#client.onOpen = () => {
 			this.#controllerConnected = undefined;
-			this.#reset();
-			this.#setState({status: "initializing"});
+			this.#reset({status: "initializing"});
 			const generation = this.#generation;
 			this.#initialTimer = setTimeout(
 				() => this.#fail(new CubeError("TIMEOUT", "Authentication or initial state timed out.")),
 				10000,
 			);
 			void options.session.getCredential().then(credential => {
-				if (generation !== this.#generation || !this.connected) throw disconnected();
+				if (generation !== this.#generation || !this.#socketOpen) throw disconnected();
 				this.#authenticationPending = true;
 				return this.#client.send({"@type": "authenticate", protocolMajor: PROTOCOL_MAJOR, credential});
 			}).then(reply => {
-				if (generation !== this.#generation || !this.connected) return;
+				if (generation !== this.#generation || !this.#socketOpen) return;
 				if (reply?.protocolMajor !== PROTOCOL_MAJOR) {
 					throw new CubeError("PROTOCOL_MISMATCH", "Controller protocol major does not match.");
 				}
@@ -215,13 +200,11 @@ export class CubeImpl implements Cube {
 		};
 		this.#client.onClose = () => {
 			this.#controllerConnected = false;
-			this.#reset();
-			this.#setState({status: "disconnected"});
-			this.#dispatchEvent("close", {});
+			this.#reset({status: "disconnected"});
 		};
-		this.#on<InitialState>("initialState", event => {
+		this.#on<InitialStateMessage>("initialState", event => {
 			if (
-				!this.#authenticated || (this.#initialReceived && this.#state.status !== "ready")
+				!this.#authenticated || (this.#initialReceived && !this.connected)
 				|| event.generation !== this.#wireGeneration || !validInitialState(event)
 			) {
 				this.#fail(new CubeError("INVALID_RESPONSE", "Invalid authenticated initial state."));
@@ -248,33 +231,38 @@ export class CubeImpl implements Cube {
 			this.#storageItems.clear();
 			this.#storageSizes.clear();
 			this.#storageBytes = 0;
-			this.#storageAvailable = false;
 			this.#initialReceived = true;
 			this.#wireRevision = event.revision;
 			this.#controllerConnected = true;
-			this.#identity = event.identity;
+			const {cubeId, appId, token, expiresAt} = event.identity;
+			const identityChanged = !this.#identity;
+			this.#identity = {cubeId, appId: appId as string};
+			this.#token = token && expiresAt ? {token, expiresAt} : undefined;
 			this.#compartments = event.compartments;
 			this.#devices = event.devices;
-			this.#occupancyState = {status: "loading", data: event.occupancies};
-			this.#storageState = {status: "loading"};
-			this.#setState({status: "initializing", generation: event.generation, revision: event.revision});
-			this.#dispatchEvent("identity", {identity: this.#identity});
+			this.#occupancies = event.occupancies;
+			// A same-generation resnapshot replaces the storage, so reads wait for the next ready barrier.
+			const wasReady = this.connected;
+			this.#connection = {status: "initializing"};
+			if (identityChanged) this.#dispatchEvent("identity", {identity: this.#identity});
 			this.#dispatchEvent("compartments", {compartments: this.#compartments});
 			this.#dispatchEvent("devices", {devices: this.#devices});
-			this.#dispatchEvent("occupancies", {occupancies: this.#occupancyState});
-			this.#dispatchAvailability();
+			this.#dispatchEvent("occupancies", {occupancies: this.#occupancies});
+			if (wasReady) {
+				this.#dispatchEvent("connection", {connection: this.#connection});
+				this.#dispatchEvent("close", {});
+			}
 		});
-		this.#on<WireBoundary>("ready", event => {
+		this.#on<ReadyMessage>("ready", () => {
 			if (this.#storageAssembly) {
 				this.#fail(new CubeError("INVALID_RESPONSE", "Invalid storage readiness barrier."));
 				return;
 			}
-			const alreadyReady = this.#state.status === "ready";
 			clearTimeout(this.#initialTimer);
-			this.#storageAvailable = true;
-			this.#setState({status: "ready", generation: event.generation, revision: event.revision});
-			this.#refreshAvailability(!alreadyReady);
-			if (!alreadyReady) this.#dispatchEvent("open", {});
+			if (this.connected) return;
+			this.#connection = {status: "ready"};
+			this.#dispatchEvent("connection", {connection: this.#connection});
+			this.#dispatchEvent("open", {});
 		});
 		this.#on<CompartmentsMessage>("compartments", event => {
 			this.#compartments = event.compartments;
@@ -292,17 +280,17 @@ export class CubeImpl implements Cube {
 			}
 		});
 		this.#on<CubeMessage>("cube", event => {
-			if (!this.#acceptExtension()) return;
-			if (this.#identity && (this.#identity.cubeId !== event.cubeId || this.#identity.appId !== event.appId)) {
+			if (!this.#acceptExtension() || !this.#identity) return;
+			if (this.#identity.cubeId !== event.cubeId || this.#identity.appId !== event.appId) {
 				this.#fail(new CubeError("AUTHENTICATION_REQUIRED", "The installed app changed."));
 				return;
 			}
-			this.#identity = {cubeId: event.cubeId, appId: event.appId, token: event.token, expiresAt: event.expiresAt};
-			this.#dispatchEvent("identity", {identity: this.#identity});
-			this.#refreshAvailability();
+			// A rotated token is not an identity change; getToken() reads it on demand.
+			this.#token = event.token && event.expiresAt ? {token: event.token, expiresAt: event.expiresAt} : undefined;
 		});
 		this.#on<OccupanciesMessage>("occupancies", event => {
-			if (this.#acceptExtension() && this.#identity?.appId) this.#replaceSnapshot(event.occupancies);
+			if (!this.#acceptExtension() || !this.#identity) return;
+			this.#setOccupancies(event.occupancies.filter(o => o.appId === this.#identity?.appId));
 		});
 		this.#on<OccupancyCreatedMessage>("occupancyCreated", event => this.#upsert("occupancyCreated", event));
 		this.#on<OccupancyUpdatedMessage>("occupancyUpdated", event => this.#upsert("occupancyUpdated", event));
@@ -311,13 +299,8 @@ export class CubeImpl implements Cube {
 			event => this.#upsert("occupancyAccessChanged", event),
 		);
 		this.#on<OccupancyEndedMessage>("occupancyEnded", event => {
-			if (!this.#acceptExtension() || !this.#identity?.appId) return;
-			if (this.#occupancyState.data) {
-				this.#setOccupancyState({
-					...this.#occupancyState,
-					data: this.#occupancyState.data.filter(o => o.uuid !== event.uuid),
-				});
-			}
+			if (!this.#acceptExtension() || !this.#identity) return;
+			if (this.#occupancies) this.#setOccupancies(this.#occupancies.filter(o => o.uuid !== event.uuid));
 			this.#dispatchEvent("occupancyEnded", event);
 		});
 		this.#on<StorageItemMessage>("storageItem", event => {
@@ -332,7 +315,7 @@ export class CubeImpl implements Cube {
 			this.#storageItems.delete(event.key);
 			this.#dispatchEvent("storage", {key: event.key});
 		});
-		this.#unsubscribeSession = this.#session.onInvalidation(() =>
+		this.#unsubscribeSession = options.session.onInvalidation(() =>
 			this.#fail(new CubeError("AUTHENTICATION_REQUIRED", "A fresh kiosk launch is required."))
 		);
 		this.#client.start();
@@ -376,7 +359,6 @@ export class CubeImpl implements Cube {
 					return;
 				}
 				this.#wireRevision = event.revision;
-				this.#setState({...this.#state, revision: event.revision});
 			}
 			try {
 				handler(message);
@@ -393,22 +375,22 @@ export class CubeImpl implements Cube {
 	}
 
 	#acceptExtension() {
-		return this.connected && this.#authenticated && this.#controllerConnected === true;
+		return this.#socketOpen && this.#authenticated && this.#controllerConnected === true;
 	}
 
-	#reset() {
+	/** Enters a status other than ready and drops everything that belonged to the previous connection. */
+	#reset(connection: ConnectionState) {
+		const wasReady = this.connected;
+		const changed = this.#connection.status !== connection.status || this.#connection.error !== connection.error;
+		this.#connection = connection;
 		this.#generation++;
-		for (const pending of [...this.#pending]) {
-			pending.reject(pending.sent && pending.mutation ? unknownOutcome() : disconnected());
-		}
-		this.#storageAvailable = false;
+		for (const pending of [...this.#pending]) pending.reject(pending.sent ? unknownOutcome() : disconnected());
 		this.#storageItems.clear();
 		this.#storageSizes.clear();
 		this.#storageBytes = 0;
 		this.#storageAssembly = undefined;
 		this.#initialReceived = false;
 		clearTimeout(this.#storageTimer);
-		this.#identity = undefined;
 		clearTimeout(this.#initialTimer);
 		this.#authenticated = false;
 		this.#authenticationPending = false;
@@ -416,86 +398,46 @@ export class CubeImpl implements Cube {
 		this.#authenticationBytes = 0;
 		this.#authenticationMessages.length = 0;
 		this.#wireGeneration = undefined;
+		this.#token = undefined;
 		this.#compartments = [];
 		this.#devices = [];
 		this.#dispatchEvent("compartments", {compartments: []});
 		this.#dispatchEvent("devices", {devices: []});
-		this.#occupancyState = {status: "loading"};
-		this.#storageState = {status: "loading"};
-		this.#dispatchEvent("identity", {identity: undefined});
-		this.#refreshAvailability(true);
-	}
-
-	#setState(state: ConnectionState) {
-		this.#state = state;
-		this.#dispatchEvent("state", state);
+		if (this.#occupancies) this.#setOccupancies(undefined);
+		if (this.#identity) {
+			this.#identity = undefined;
+			this.#dispatchEvent("identity", {identity: undefined});
+		}
+		if (changed) this.#dispatchEvent("connection", {connection});
+		if (wasReady) this.#dispatchEvent("close", {});
 	}
 
 	#fail(error: CubeError) {
 		this.#client.onClose = undefined;
 		this.#client.stop();
 		this.#controllerConnected = false;
-		this.#reset();
-		this.#setState({status: error.code === "AUTHENTICATION_REQUIRED" ? "unavailable" : "error", error});
+		this.#reset({status: error.code === "AUTHENTICATION_REQUIRED" ? "unavailable" : "error", error});
 	}
 
 	#resynchronize() {
 		this.#controllerConnected = false;
-		this.#reset();
-		this.#setState({status: "initializing"});
+		this.#reset({status: "initializing"});
 		this.#client.start();
 	}
 
-	#featureState(): AvailabilityState {
-		if (!this.connected) return {status: "unavailable", error: disconnected()};
-		if (!this.#acceptExtension() || !this.#identity || this.#state.status !== "ready") return {status: "loading"};
-		return {status: "ready"};
-	}
-
-	#refreshAvailability(force = false) {
-		const storage = this.#featureState();
-		if (storage.status === "ready" && !this.#storageAvailable) storage.status = "unavailable";
-		const occupancy = this.#featureState();
-		const nextOccupancy: OccupancyState = occupancy.status === "ready"
-			? this.#occupancyState.data ? {status: "ready", data: this.#occupancyState.data} : {status: "loading"}
-			: occupancy;
-		const occupancyChanged = force || !sameAvailability(this.#occupancyState, nextOccupancy);
-		const storageChanged = force || !sameAvailability(this.#storageState, storage);
-		if (occupancyChanged) {
-			this.#occupancyState = nextOccupancy;
-			this.#dispatchEvent("occupancies", {occupancies: this.#occupancyState});
-		}
-		if (storageChanged) this.#storageState = storage;
-		if (occupancyChanged || storageChanged) this.#dispatchAvailability();
-	}
-
-	#dispatchAvailability() {
-		this.#dispatchEvent("availability", {occupancies: this.#occupancyState, storage: this.#storageState});
-	}
-
-	#setOccupancyState(state: OccupancyState) {
-		this.#occupancyState = state;
-		this.#dispatchEvent("occupancies", {occupancies: state});
-		this.#dispatchAvailability();
-	}
-
-	#replaceSnapshot(data: Occupancy[]) {
-		this.#setOccupancyState({
-			status: this.#state.status === "ready" ? "ready" : "loading",
-			data: data.filter(o => o.appId === this.#identity?.appId),
-		});
+	#setOccupancies(occupancies: Occupancy[] | undefined) {
+		this.#occupancies = occupancies;
+		this.#dispatchEvent("occupancies", {occupancies});
 	}
 
 	#upsert(name: "occupancyCreated" | "occupancyUpdated" | "occupancyAccessChanged", event: OccupancyChangedEvent) {
-		if (!this.#acceptExtension() || !this.#identity?.appId || event.occupancy.appId !== this.#identity.appId) {
-			return;
-		}
-		if (this.#occupancyState.data) {
-			const data = [...this.#occupancyState.data];
+		if (!this.#acceptExtension() || event.occupancy.appId !== this.#identity?.appId) return;
+		if (this.#occupancies) {
+			const data = [...this.#occupancies];
 			const index = data.findIndex(o => o.uuid === event.occupancy.uuid);
 			if (index === -1) data.push(event.occupancy);
 			else data[index] = event.occupancy;
-			this.#setOccupancyState({...this.#occupancyState, data});
+			this.#setOccupancies(data);
 		}
 		this.#dispatchEvent(name, event);
 	}
@@ -554,40 +496,36 @@ export class CubeImpl implements Cube {
 		this.#storeItem(item);
 	}
 
-	#localRead<T>(read: () => T): Promise<T> {
-		const generation = this.#generation;
-		return Promise.resolve().then(() => {
-			if (generation !== this.#generation || !this.#acceptExtension()) throw disconnected();
-			if (this.#state.status !== "ready") {
-				throw new CubeError("NOT_READY", "The complete controller snapshot is not available.");
-			}
-			return read();
-		});
+	/** Why reads and commands are refused, or undefined when the connection is ready. */
+	#unready(): CubeError | undefined {
+		const {status, error} = this.#connection;
+		if (status === "ready") return undefined;
+		if (error) return error;
+		return status === "initializing"
+			? new CubeError("NOT_READY", "The complete controller snapshot is not available yet.")
+			: disconnected();
 	}
 
-	#listOccupancies(access?: string): Promise<Occupancy[]> {
-		return this.#localRead(() =>
-			structuredClone(
-				(this.#occupancyState.data ?? []).filter(occupancy =>
-					access === undefined || occupancy.accessCode === access || occupancy.accessKeys.includes(access)
-				),
-			)
-		);
+	/** Local reads never answer from an incomplete snapshot: unknown data must not look empty or absent. */
+	#assertReady() {
+		const unready = this.#unready();
+		if (unready) throw unready;
 	}
 
-	#withStorage<T>(key: string, convert: (item: StorageItem) => T): Promise<T> {
-		return this.#localRead(() => {
-			const item = this.#storageItems.get(key);
-			if (!item) throw new CubeError("NOT_FOUND", "Storage item not found in the current snapshot.");
-			return convert(structuredClone(item));
-		});
+	#readOccupancies(): Occupancy[] {
+		this.#assertReady();
+		return this.#occupancies ?? [];
 	}
 
-	#request<T = void>(message: VcmpMessage & Record<string, unknown>, mutation = false): Promise<T> {
-		if (!this.connected) return Promise.reject(disconnected());
-		if (this.#state.status !== "ready") {
-			return Promise.reject(new CubeError("NOT_READY", "Authenticated initial state is not available."));
-		}
+	#readStorage(key: string): StorageItem | undefined {
+		this.#assertReady();
+		return this.#storageItems.get(key);
+	}
+
+	/** Every request is a mutation: once sent, a lost reply leaves its outcome unknown and it is never replayed. */
+	#request<T = void>(message: VcmpMessage & Record<string, unknown>): Promise<T> {
+		const unready = this.#unready();
+		if (unready) return Promise.reject(unready);
 		if (this.#pending.size >= 64 || new TextEncoder().encode(JSON.stringify(message)).byteLength > 65536) {
 			return Promise.reject(new CubeError("LIMIT_EXCEEDED", "The request exceeds the client request budget."));
 		}
@@ -602,13 +540,9 @@ export class CubeImpl implements Cube {
 				if (error) reject(error);
 				else resolve(value as T);
 			};
-			const pending: PendingRequest = {sent: false, mutation, reject: error => finish(error)};
+			const pending: PendingRequest = {sent: false, reject: error => finish(error)};
 			const timeout = setTimeout(() => {
-				finish(
-					mutation
-						? unknownOutcome()
-						: new CubeError("TIMEOUT", "The controller request exceeded its original 10-second deadline."),
-				);
+				finish(unknownOutcome());
 				// Closing the underlying VCMP session reclaims correlation callbacks as well.
 				this.#resynchronize();
 			}, 10000);
@@ -616,7 +550,7 @@ export class CubeImpl implements Cube {
 			try {
 				pending.sent = true;
 				void this.#client.send(message).then(reply => {
-					if (generation !== this.#generation) return finish(mutation ? unknownOutcome() : disconnected());
+					if (generation !== this.#generation) return finish(unknownOutcome());
 					if (
 						!replySchema.safeParse(reply).success || reply.generation !== this.#wireGeneration
 						|| !Number.isSafeInteger(reply.revision)
@@ -626,48 +560,47 @@ export class CubeImpl implements Cube {
 						);
 					}
 					finish(undefined, reply.result as T);
-				}, error => {
-					const failure = toCubeError(error);
-					finish(isTransportFailure(error) ? mutation ? unknownOutcome() : disconnected() : failure);
-				});
+				}, error => finish(isTransportFailure(error) ? unknownOutcome() : toCubeError(error)));
 			}
 			catch {
-				finish(mutation ? unknownOutcome() : disconnected());
+				finish(unknownOutcome());
 			}
 		});
 	}
 
 	getToken(): Promise<string> {
-		return this.#localRead(() => {
-			const identity = this.#identity;
-			if (!identity?.token || !identity.expiresAt) {
+		const generation = this.#generation;
+		// Asynchronous on purpose: it fits authorization callbacks and leaves room for on-demand refresh.
+		return Promise.resolve().then(() => {
+			if (generation !== this.#generation) throw disconnected();
+			this.#assertReady();
+			if (!this.#identity || !this.#token) {
 				throw new CubeError("NOT_READY", "A current app token has not been published.");
 			}
-			if (tokenExpiry(identity.token, identity) !== identity.expiresAt) {
+			if (tokenExpiry(this.#token.token, this.#identity) !== this.#token.expiresAt) {
 				throw new CubeError("INVALID_RESPONSE", "The published token expiry is inconsistent.");
 			}
-			return identity.token;
+			return this.#token.token;
 		});
 	}
 
 	get identity() {
 		return this.#identity;
 	}
-	get state() {
-		return this.#state;
+	get connection() {
+		return this.#connection;
 	}
 
 	setCompartmentMaintenance(compartmentNumber: string, required: boolean): Promise<void> {
 		return this.#request(
 			{"@type": "updateBoxMaintenance", boxNumber: compartmentNumber, maintenanceRequired: required},
-			true,
 		);
 	}
 
 	close() {
 		this.#unsubscribeSession();
 		this.#controllerConnected = false;
-		this.#reset();
+		this.#reset({status: "disconnected"});
 		this.#client.stop();
 	}
 
@@ -692,26 +625,26 @@ export class CubeImpl implements Cube {
 	}
 
 	restartUserInterface(): Promise<void> {
-		return this.#request({"@type": "restartUi"}, true);
+		return this.#request({"@type": "restartUi"});
 	}
 	restartOperatingSystem(): Promise<void> {
-		return this.#request({"@type": "restartOs"}, true);
+		return this.#request({"@type": "restartOs"});
 	}
 	restartController(): Promise<void> {
-		return this.#request({"@type": "restartController"}, true);
+		return this.#request({"@type": "restartController"});
 	}
 	restartDevice(deviceId: string): Promise<void> {
-		return this.#request({"@type": "restartDevice", deviceId}, true);
+		return this.#request({"@type": "restartDevice", deviceId});
 	}
 
 	async configureCodeReader(config: CodeReaderConfig) {
 		const {valid, errors} = validateCodeReaderConfig(config);
 		if (!valid) throw new CubeError("INVALID_REQUEST", `Invalid code reader configuration: ${errors.join("; ")}`);
-		await this.#request({"@type": "configureCodeReader", config}, true);
+		await this.#request({"@type": "configureCodeReader", config});
 	}
 
 	openLock(lock: string, context?: OpenContext): Promise<void> {
-		return this.#request({"@type": "openLock", lock, ...context}, true);
+		return this.#request({"@type": "openLock", lock, ...context});
 	}
 
 	async openCompartment(compartmentNumber: string, context?: OpenContext) {
@@ -741,6 +674,9 @@ export class CubeImpl implements Cube {
 		return this.#secondary;
 	}
 	get connected() {
+		return this.#connection.status === "ready";
+	}
+	get #socketOpen() {
 		return Boolean(this.#client.connected);
 	}
 }
@@ -753,9 +689,6 @@ function unknownOutcome() {
 		"COMMAND_OUTCOME_UNKNOWN",
 		"The command was sent but its outcome is unknown. Reconcile the authoritative occupancy snapshot before continuing; do not blindly retry.",
 	);
-}
-function sameAvailability(a: AvailabilityState, b: AvailabilityState) {
-	return a.status === b.status && a.error?.code === b.error?.code && a.error?.message === b.error?.message;
 }
 function isTransportFailure(error: unknown) {
 	if (!error || typeof error !== "object") return false;
@@ -799,19 +732,7 @@ function tokenExpiry(token: string, identity: CubeIdentity): number {
 	}
 }
 
-interface WireBoundary {
-	generation: number;
-	revision: number;
-}
-
-interface InitialState extends WireBoundary {
-	identity: CubeIdentity;
-	compartments: Compartment[];
-	devices: Device[];
-	occupancies: Occupancy[];
-}
-
-function validInitialState(value: InitialState): boolean {
+function validInitialState(value: InitialStateMessage): boolean {
 	return initialStateSchema.safeParse(value).success && Number.isSafeInteger(value.revision) && value.revision >= 0
 		&& !!value.identity && typeof value.identity.cubeId === "string" && typeof value.identity.appId === "string"
 		&& Array.isArray(value.compartments) && Array.isArray(value.devices) && Array.isArray(value.occupancies)

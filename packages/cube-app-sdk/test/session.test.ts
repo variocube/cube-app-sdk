@@ -1,9 +1,9 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
-import {bootstrapController, ControllerSession} from "../src/session.js";
+import {bootstrapSession, ControllerSessionImpl as ControllerSession} from "../src/session.js";
 
 const secret = "opaque-bootstrap-grant-123456789";
 const credential = "memory-only-credential-123456789";
-const sessions: ControllerSession[] = [];
+const sessions: Array<{ close(): void }> = [];
 const response = (changes: object = {}) =>
 	new Response(
 		JSON.stringify({credential, generation: 1, expiresAt: Math.floor(Date.now() / 1000) + 600, ...changes}),
@@ -50,7 +50,7 @@ describe("early bootstrap cleanup", () => {
 				return response();
 			});
 			const state = {router: "retained"};
-			const promise = bootstrapController({
+			const promise = bootstrapSession({
 				location: {href: envelope(original)},
 				history: {
 					state,
@@ -70,7 +70,7 @@ describe("early bootstrap cleanup", () => {
 		const replaceState = vi.fn();
 		const transport = vi.fn<typeof fetch>();
 		await expect(
-			bootstrapController({
+			bootstrapSession({
 				location: {href: "https://app.example/#vc-bootstrap=%invalid-secret"},
 				history: {state: null, replaceState},
 				fetch: transport,
@@ -84,7 +84,7 @@ describe("early bootstrap cleanup", () => {
 	it("consumed links never fall back to a persistent or anonymous credential", async () => {
 		const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response("private diagnostics", {status: 401}));
 		await expect(
-			bootstrapController({
+			bootstrapSession({
 				location: {href: envelope("https://app.example/")},
 				history: {state: null, replaceState: vi.fn()},
 				fetch: transport,
@@ -203,7 +203,7 @@ describe("missing bootstrap recovery", () => {
 		"asks for a kiosk reload once with no returned credential: %s",
 		async outcome => {
 			vi.resetModules();
-			const {bootstrapController: bootstrap} = await import("../src/session.js");
+			const {bootstrapSession: bootstrap} = await import("../src/session.js");
 			const transport = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
 				if (outcome === "timeout") {
 					return new Promise((_resolve, reject) =>

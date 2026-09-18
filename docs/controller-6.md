@@ -42,7 +42,7 @@ session's stream, including local device/identity events; they are not a global 
 and reopen the socket to resnapshot. Changed app generations require a fresh kiosk launch and never inherit authority.
 
 The SDK sends authentication and mutations only. `getOccupancy`, `getOccupancies`, `getStorageItem`, `getStorageKeys`
-and `getToken` are removed from the wire. The public async read methods read the latest complete pushed cache without
+and `getToken` are removed from the wire. The public read methods are synchronous and read the latest complete pushed cache without
 network requests. Local reads can trail a just-acknowledged mutation until its publication arrives; use events or wait
 for the expected UUID/state when reconciling. No mutation is replayed automatically.
 
@@ -55,7 +55,8 @@ publication uses the contiguous per-session revision, including storage chunks a
 - `storageChunk {generation,revision,key,index,total,content}` carries standard base64 of at most 48 KiB of raw bytes.
   The zero-based chunks arrive sequentially. Concatenated bytes are UTF-8 JSON for the complete StorageItem object
   `{key,contentType,encoding,content}`. The replacement becomes visible only after all chunks validate.
-- `cube` pushes current identity and renewed backend JWTs. `getToken()` validates the current cached audience and
+- `cube` pushes current identity and renewed backend JWTs. The SDK keeps the JWT out of `cube.identity` and the
+  `identity` event, so a rotation is not a public identity change. `getToken()` validates the current cached audience and
   expiry; it never requests a replacement token. Controller renewal must arrive before expiry.
 
 Storage holds the complete app snapshot without eviction: at most 16384 keys, 1 MiB + 4096 bytes per serialized item,
@@ -70,7 +71,7 @@ Zod validates event and response boundaries. At most 64 mutation requests and 64
 
 `session.openMaintenance()` navigates normally to the trusted controller's `/maintenance?returnUrl=...`, carrying only
 the clean current app URL. It requests no maintenance context and passes no credential in that URL. Technician login
-belongs to the maintenance UI. When a page has no bootstrap envelope, `bootstrapController()` makes at most one bounded
+belongs to the maintenance UI. When a page has no bootstrap envelope, `bootstrapSession()` makes at most one bounded
 `POST /app/relaunch` request per page, then reports authentication required while waiting for the trusted kiosk to reload
 a fresh launch. The controller authorizes that unauthenticated retry only for an actual loopback peer and the configured
 app Origin. The response cannot issue a grant to this helper, choose navigation or trigger automatic retries.

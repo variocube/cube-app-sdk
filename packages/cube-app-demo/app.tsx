@@ -41,7 +41,7 @@ import {
 	useStorageItem,
 } from "@variocube/cube-app-react-sdk";
 import {CodeEvent, LockEvent, Occupancy} from "@variocube/cube-app-sdk";
-import React, {StrictMode, useEffect, useRef, useState} from "react";
+import React, {StrictMode, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 
 export function renderApp(session: import("@variocube/cube-app-sdk").ControllerSession) {
@@ -216,11 +216,7 @@ function IdentityCard() {
 				? (
 					<Stack spacing={1}>
 						<Typography>Cube: {identity.cubeId}</Typography>
-						<Typography>Installed app: {identity.appId ?? "No single installed app"}</Typography>
-						<Typography>
-							Token expires:{" "}
-							{identity.expiresAt ? new Date(identity.expiresAt * 1000).toLocaleString() : "Unavailable"}
-						</Typography>
+						<Typography>Installed app: {identity.appId}</Typography>
 					</Stack>
 				)
 				: <Typography>Waiting for the controller identity.</Typography>}
@@ -293,7 +289,7 @@ function OccupancyCard() {
 		}
 		setBusy(true);
 		try {
-			const current = await cube.occupancies.list();
+			const current = cube.occupancies.list();
 			const match = current.find(item =>
 				recovery.uuid
 					? item.uuid === recovery.uuid
@@ -408,12 +404,11 @@ function StorageCard() {
 				</Typography>
 				<TextField label="Document key" value={key} onChange={event => setKey(event.target.value)} />
 				<Typography>JSON read: {item.status}</Typography>
-				{item.error && (
-					<Alert severity={item.status === "not-found" ? "info" : "warning"}>
-						{describeError(item.error)}
-					</Alert>
+				{item.error && <Alert severity="warning">{describeError(item.error)}</Alert>}
+				{item.status === "ready" && item.data === undefined && (
+					<Alert severity="info">No document is stored under this key.</Alert>
 				)}
-				{item.status === "ready" && (
+				{item.status === "ready" && item.data !== undefined && (
 					<Box component="pre" sx={{overflow: "auto"}}>{JSON.stringify(item.data, null, 2)}</Box>
 				)}
 				<StorageBlobPreview documentKey={key} />
@@ -424,42 +419,31 @@ function StorageCard() {
 
 function StorageBlobPreview({documentKey}: { documentKey: string }) {
 	const cube = useCube();
-	const identity = useIdentity();
-	const generation = useRef(0);
+	const connected = useConnected();
 	const [details, setDetails] = useState<string>();
+	// A preview describes one stored value: drop it when the key, its value or the connection changes.
 	useEffect(() => {
-		const clear = () => {
-			generation.current++;
-			setDetails(undefined);
-		};
-		const changed = ({key}: { key: string }) => {
-			if (key === documentKey) clear();
-		};
-		cube.addEventListener("storage", changed);
-		cube.addEventListener("availability", clear);
-		clear();
-		return () => {
-			generation.current++;
-			cube.removeEventListener("storage", changed);
-			cube.removeEventListener("availability", clear);
-		};
-	}, [cube, documentKey, identity?.cubeId, identity?.appId]);
-	async function readBlob() {
-		const current = ++generation.current;
-		setDetails("Loading binary representation…");
+		setDetails(undefined);
+		const unsubscribe = [
+			cube.addEventListener("storage", ({key}) => {
+				if (key === documentKey) setDetails(undefined);
+			}),
+			cube.addEventListener("connection", () => setDetails(undefined)),
+		];
+		return () => unsubscribe.forEach(remove => remove());
+	}, [cube, documentKey]);
+	function readBlob() {
 		try {
-			const blob = await cube.storage.getBlob(documentKey);
-			if (current === generation.current) {
-				setDetails(`${blob.type || "Unknown content type"}, ${blob.size} bytes`);
-			}
+			const blob = cube.storage.getBlob(documentKey);
+			setDetails(blob ? `${blob.type || "Unknown content type"}, ${blob.size} bytes` : "No value is stored.");
 		}
 		catch (error) {
-			if (current === generation.current) setDetails(describeError(error));
+			setDetails(describeError(error));
 		}
 	}
 	return (
 		<Stack direction="row" spacing={2} alignItems="center">
-			<Button onClick={readBlob} disabled={cube.storage.state.status !== "ready"}>Read as blob</Button>
+			<Button onClick={readBlob} disabled={!connected}>Read as blob</Button>
 			{details && <Typography>{details}</Typography>}
 		</Stack>
 	);

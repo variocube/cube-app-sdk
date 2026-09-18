@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import {connect, ControllerSession, Occupancy} from "@variocube/cube-app-sdk";
+import {connect, Occupancy} from "@variocube/cube-app-sdk";
 import React, {act} from "react";
 import {createRoot} from "react-dom/client";
 import {expect, it, vi} from "vitest";
 import fixtures from "../../../test/fixtures/controller-wire.json";
 import {CubeImpl} from "../../cube-app-sdk/src/cube";
+import {ControllerSessionImpl} from "../../cube-app-sdk/src/session";
 import {CubeProvider, useOccupancies, useOccupancy, useStorageItem} from "../src/index";
 
 const wire = vi.hoisted(() => ({
@@ -45,7 +46,7 @@ vi.mock("@variocube/cube-app-sdk", async importOriginal => ({
 
 it("renders controller lifecycle events through the real SDK cache, including cancellation", async () => {
 	(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-	const session = new ControllerSession("http://localhost:9000", fetch, {
+	const session = new ControllerSessionImpl("http://localhost:9000", fetch, {
 		credential: "test-credential-12345",
 		expiresAt: Math.floor(Date.now() / 1000) + 600,
 		generation: 1,
@@ -88,7 +89,7 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 		await act(async () => {
 			wire.onOpen();
 		});
-		expect(read().all.status).toBe("loading");
+		expect(read().all.status).toBe("initializing");
 		await act(async () =>
 			emit({
 				"@type": "initialState",
@@ -98,7 +99,7 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 				occupancies: [pending],
 			})
 		);
-		expect(read().stored.status).toBe("loading");
+		expect(read().stored.status).toBe("initializing");
 		await act(async () =>
 			emit({
 				"@type": "storageItem",
@@ -108,7 +109,7 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 				content: null,
 			})
 		);
-		expect(read().stored.status).toBe("loading");
+		expect(read().stored.status).toBe("initializing");
 		await act(async () => emit({"@type": "ready"}));
 		expect(read().stored).toEqual({status: "ready", data: null});
 		await act(async () =>
@@ -122,7 +123,8 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 		);
 		expect(read().stored).toEqual({status: "ready", data: {value: 1}});
 		await act(async () => emit({"@type": "storageItemRemoved", key: "config"}));
-		expect(read().stored.status).toBe("not-found");
+		// JSON.stringify drops the undefined data of a missing key.
+		expect(read().stored).toEqual({status: "ready"});
 		expect(read().item.data.state).toBe("pending");
 		const confirmed = {...pending, state: "confirmed"};
 		await act(async () => emit({"@type": "occupancyCreated", occupancy: confirmed}));
@@ -141,7 +143,8 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 		await act(async () => emit(fixtures.emptySnapshot));
 		expect(read().all).toEqual({status: "ready", data: []});
 		await act(async () => emit({"@type": "availability", connected: false}));
-		expect(read().all.status).toBe("unavailable");
+		// The hooks share the connection's status and reason instead of a separate per-domain availability.
+		expect(read().all).toMatchObject({status: "error", error: {code: "UNAVAILABLE"}});
 		expect(read().all).not.toHaveProperty("data");
 	}
 	finally {

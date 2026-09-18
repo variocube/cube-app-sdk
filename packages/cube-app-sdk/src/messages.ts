@@ -2,8 +2,9 @@ import {VcmpMessage} from "@variocube/vcmp";
 import type {
 	ChangeOccupancyAccessOptions,
 	CodeReaderConfig,
+	Compartment,
 	CompartmentsEvent,
-	CubeIdentity,
+	Device,
 	DevicesEvent,
 	EndOccupancyOptions,
 	LockEvent,
@@ -64,11 +65,47 @@ export interface ConfigureCodeReaderMessage extends VcmpMessage {
 	config: CodeReaderConfig;
 }
 
-export interface CubeMessage extends VcmpMessage, CubeIdentity {
+/** Every controller publication and reply carries the app generation and the session's contiguous revision. */
+export interface WireBoundary {
+	generation: number;
+	revision: number;
+}
+
+/** The first request on `/app`; its reply is `{protocolMajor, generation}`. */
+export interface AuthenticateMessage extends VcmpMessage {
+	"@type": "authenticate";
+	protocolMajor: number;
+	credential: string;
+}
+
+/** The authoritative snapshot after authentication; storage items and the `ready` barrier follow. */
+export interface InitialStateMessage extends VcmpMessage, WireBoundary {
+	"@type": "initialState";
+	identity: CubeMessageIdentity;
+	compartments: Compartment[];
+	devices: Device[];
+	occupancies: Occupancy[];
+}
+
+/** Commits the initial snapshot including the complete storage. */
+export interface ReadyMessage extends VcmpMessage, WireBoundary {
+	"@type": "ready";
+}
+
+/** Identity as published on the wire, including the backend token. `expiresAt` is Unix epoch seconds. */
+export interface CubeMessageIdentity {
+	cubeId: string;
+	appId: string | null;
+	token: string | null;
+	expiresAt: number | null;
+}
+
+/** Pushes the current identity and rotated backend tokens. */
+export interface CubeMessage extends VcmpMessage, CubeMessageIdentity {
 	"@type": "cube";
 }
 
-/** Service-to-browser state of the real controller connection. */
+/** Legacy (SDK 1 service): service-to-browser state of the real controller connection. */
 export interface AvailabilityMessage extends VcmpMessage {
 	"@type": "availability";
 	connected: boolean;
@@ -112,7 +149,7 @@ export interface StorageChunkMessage extends VcmpMessage {
 	content: string;
 }
 
-/** The wire envelope of a stored value, as replied to `getStorageItem`. */
+/** The wire envelope of a stored value. */
 export interface StorageItem {
 	key: string;
 	contentType: string;

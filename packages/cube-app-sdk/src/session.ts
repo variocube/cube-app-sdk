@@ -25,7 +25,7 @@ interface Credential {
  * Call before importing the router, analytics or application entry point. Cleans history synchronously,
  * before starting any network request. The single-use grant is never written to browser storage.
  */
-export function bootstrapController(options: BootstrapOptions = {}): Promise<ControllerSession> {
+export function bootstrapSession(options: BootstrapOptions = {}): Promise<ControllerSession> {
 	const location = options.location ?? window.location;
 	const history = options.history ?? window.history;
 	const url = new URL(location.href);
@@ -55,11 +55,24 @@ export function bootstrapController(options: BootstrapOptions = {}): Promise<Con
 	const endpoint = trustedEndpoint(options.endpoint ?? "http://localhost:9000");
 	const transport = options.fetch ?? globalThis.fetch.bind(globalThis);
 	return requestCredential({endpoint, transport, path: "/app/bootstrap", grant})
-		.then(credential => new ControllerSession(endpoint, transport, credential));
+		.then(credential => new ControllerSessionImpl(endpoint, transport, credential));
 }
 
-/** Memory-only local API authority. This is separate from the backend app JWT returned by cube.getToken(). */
-export class ControllerSession {
+/**
+ * Memory-only local API authority, obtained from `bootstrapSession()` and passed to `connect()` or `CubeProvider`.
+ * This is separate from the backend app JWT returned by `cube.getToken()`.
+ */
+export interface ControllerSession {
+	/** The trusted controller origin. */
+	readonly endpoint: string;
+	/** Navigates to the controller's maintenance UI, which returns to the current URL. Ends this session. */
+	openMaintenance(): Promise<void>;
+	/** Discards the credential and terminates every connection made from this session. */
+	close(): void;
+}
+
+/** Internal: credential handling stays out of the public session type. */
+export class ControllerSessionImpl implements ControllerSession {
 	#credential: Credential | undefined;
 	#refresh: Promise<string> | undefined;
 	#timer: ReturnType<typeof setTimeout> | undefined;

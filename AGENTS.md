@@ -76,11 +76,13 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 - `Compartment`: Describes a locker compartment with lock assignments
 - `Device`: Hardware devices (BarcodeReader, Keypad, NfcReader, etc.)
 - `LockStatus`: "OPEN" | "CLOSED" | "BREAKIN" | "BLOCKED"
-- Events: hardware events plus `identity`, `state`, `availability`, `occupancies`, lifecycle events, and `storage`
+- Events (`CubeEventMap`): hardware events plus `connection`, `identity`, `occupancies`, lifecycle events, and `storage`
 - `cube.occupancies`: controller-owned reservation/confirmation/cancellation/update/access/end lifecycle and snapshots
 - `cube.storage`: Center-write-only JSON/blob reads from full pushed values/deletions; memory caches only
-- `cube.identity` / `getToken()`: controller-issued installed-app credentials; no separate app message/property
-- Availability: `loading`, `ready`, `unavailable`, `error`; unknown data is never represented as loaded-empty
+- Reads (`occupancies.list/get`, `storage.get/getBlob/keys`) are synchronous; absent is `undefined`, not ready throws
+- `cube.identity` (`cubeId`, `appId`) / `getToken()`: the token is never part of identity, events or hook results
+- `cube.connection`: the only readiness model (`disconnected`, `initializing`, `ready`, `unavailable`, `error`);
+  `connected`, `open`/`close` and every hook follow it; unknown data is never represented as loaded-empty
 
 ## Code Style
 
@@ -115,7 +117,7 @@ Exactly one installed Center app is resolved by the controller; requests cannot 
 Use the actual controller `api/app` message classes: occupancy states are `pending`, `confirmed`, `ended`,
 confirmation upserts via `occupancyCreated`, and cancellation removes pending reservations via `occupancyEnded`.
 Preserve full nullable occupancy fields and content. The service caches snapshots in memory and relays typed ACK
-results/NAKs with correlation. Storage JSON null is distinct from `NOT_FOUND`.
+results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`).
 
 On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
 Controller 6 has no capability discovery. Authentication/initial-state and commands have 10-second deadlines.
@@ -127,8 +129,10 @@ Controller renewals arrive via `cube`; `expiresAt` is epoch seconds. Generation 
 before fetch/OpenAPI calls, never persist or log it. Business state remains in the controller, not browser storage.
 
 React hooks share `CubeProvider`: `useOccupancies`, `useOccupancy`, `useStorageItem`, `useStorageValue`,
-`useIdentity`. Storage has an additional `not-found` result; value-only reads cannot establish business absence.
-Subscriptions and caches belong to the provider/SDK lifecycle and must discard late asynchronous results.
+`useIdentity`, `useConnectionState`. Data hooks return `CubeResult<T>`: `data` only with status `ready`, where
+`undefined` establishes absence; value-only reads cannot. Keep wire sequencing (generation/revision) and credentials
+out of public state and events. `ControllerSession` is a public interface; credential handling stays on the internal
+`ControllerSessionImpl`. `session.close()` also ends every connection made from it.
 
 ## Publishing
 

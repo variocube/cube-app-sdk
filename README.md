@@ -12,13 +12,13 @@ release stamping. See [provenance and validation](docs/controller-6.md).
 
 Kiosk obtains a short-lived, single-use grant through the controller's Unix socket. The server resolves the installed
 app and configured app URL. The grant wraps the original fragment; reusable credentials never enter query parameters.
-Call `bootstrapController` before importing the router, analytics or application modules. It synchronously restores
+Call `bootstrapSession` before importing the router, analytics or application modules. It synchronously restores
 clean history, exchanges the grant, and keeps the local API credential in memory.
 
 ```typescript
-import {bootstrapController} from "@variocube/cube-app-sdk";
+import {bootstrapSession} from "@variocube/cube-app-sdk";
 
-void bootstrapController({endpoint: "http://localhost:9000"}).then(async session => {
+void bootstrapSession({endpoint: "http://localhost:9000"}).then(async session => {
 	const {renderApp} = await import("./app");
 	renderApp(session);
 });
@@ -29,8 +29,9 @@ in app code. HTTP is restricted to loopback; remote endpoints require HTTPS. URL
 identity, app ID, audience or terminal. `secondary: true` selects secondary locks on the authenticated cube.
 
 The first `/app` WebSocket message authenticates protocol major 6. No hardware command or subscription is usable until
-an authoritative initial snapshot arrives. `cube.state` / `useConnectionState()` expose `disconnected`, `initializing`,
-`ready`, `unavailable`, and `error`. Occupancy/storage hooks separately retain loaded/unknown distinctions.
+an authoritative initial snapshot arrives. `cube.connection` / `useConnectionState()` expose `disconnected`,
+`initializing`, `ready`, `unavailable` (a fresh kiosk launch is required), and `error`. This is the only readiness model:
+`cube.connected`, the `open`/`close` events, local reads and every React hook follow it.
 
 Local API credentials renew 30 seconds before expiry. Backend app JWTs come from `cube.getToken()` and have the exact
 installed app audience. They are separate from local API credentials, Center identity proofs and technician sessions.
@@ -41,7 +42,7 @@ obtains a fresh launch when the old session is lost. A consumed URL cannot authe
 
 ```typescript
 const reservation = await cube.occupancies.occupyCompartment({boxNumber: "1", content: {handover: "reference"}});
-await cube.occupancies.confirm(reservation.uuid, {confirmed: true}, true);
+await cube.occupancies.confirm(reservation.uuid, {content: {confirmed: true}, merge: true});
 await cube.occupancies.changeAccess(reservation.uuid, {accessKeys: ["access-reference"]});
 await cube.occupancies.update(reservation.uuid, {content: null});
 await cube.openCompartment(reservation.boxNumber, {actor: "customer", action: "collect"});
@@ -49,18 +50,32 @@ await cube.occupancies.end(reservation.uuid, {gracePeriod: 30});
 ```
 
 Allocation and physical opening are separate. Opening acceptance does not establish observed door state; use lock
-events. `occupyType`, `cancel`, `setBoxMaintenance`, reader configuration, device events and retained restart commands use the
-same authenticated connection. `list` and `get` read the latest pushed occupancy snapshot locally. Authorization is enforced by the controller.
+events. `occupyType`, `cancel`, `setCompartmentMaintenance`, reader configuration, device events and retained restart commands use the
+same authenticated connection. `occupyCompartment` allocates one specific compartment, `occupyType({type, features?})`
+lets the controller choose one with the same `CompartmentFeature` values as `Compartment.features`. The controller calls
+compartments boxes: `boxNumber` is a `Compartment.number`. Authorization is enforced by the controller.
+
+`occupancies.list(access?)` and `occupancies.get(uuid)` are synchronous reads of the latest pushed snapshot; `get`
+returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown
+snapshot is never mistaken for an empty one. A local read can trail a just-acknowledged mutation until its publication
+arrives. Lifecycle events follow the controller's names: a confirmation arrives as `occupancyCreated`, a cancellation
+as `occupancyEnded`. `addEventListener` returns a function that removes the listener.
 
 Lost mutation replies produce `COMMAND_OUTCOME_UNKNOWN`. Reconcile a known UUID or handover reference with fresh
 controller publications; the SDK never replays mutations after disconnect, timeout or cancellation. Generation changes clear
 identity, snapshots and caches. Per-session contiguous publication revisions detect gaps and trigger a fresh snapshot;
 these revisions do not promise global equality across sessions.
 
-Storage is Center-write-only. `cube.storage.get<T>(key)` preserves JSON `null`; missing/deleted values reject with
-`NOT_FOUND`. `getBlob(key)` preserves binary bytes and content type; `keys()` lists keys. The SDK retains the complete bounded app snapshot in memory and applies pushed values/deletions; initialization
-finishes only at the controller's `ready` barrier. No read method sends a `get*` request. `getToken()` reads the current
-pushed JWT and rejects a wrong or expired audience without exposing a Center token. The controller pushes token rotations.
+Storage is Center-write-only and read synchronously. `cube.storage.get<T>(key)` preserves JSON `null` and returns
+`undefined` for missing/deleted keys; pass a validator as `get(key, schema.parse)` instead of asserting `T`.
+`getBlob(key)` preserves binary bytes and content type; `keys()` lists keys. The SDK retains the complete bounded app
+snapshot in memory and applies pushed values/deletions; initialization finishes only at the controller's `ready`
+barrier. No read method sends a `get*` request.
+
+`cube.identity` is `{cubeId, appId}`. The backend JWT is deliberately not part of it, of any event or of any hook
+result: `await cube.getToken()` immediately before each backend request is the only way to obtain it. It reads the
+current pushed JWT and rejects a wrong or expired audience without exposing a Center token. The controller pushes token
+rotations; they are not identity changes.
 
 ## Native development and checks
 

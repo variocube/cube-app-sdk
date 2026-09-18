@@ -1,6 +1,6 @@
-import {bootstrapController} from "@sdk/session";
+import {bootstrapSession} from "@sdk/session";
 
-void bootstrapController({endpoint: "http://127.0.0.1:15173"}).then(session => {
+void bootstrapSession({endpoint: "http://127.0.0.1:15173"}).then(session => {
 	document.getElementById("status")!.textContent = "authenticated";
 	window.addEventListener("pagehide", () => session.close(), {once: true});
 }).catch(() => {
