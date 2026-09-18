@@ -54,15 +54,15 @@ afterAll(() => {
 test("native authenticated reserve/confirm/access/update/end and read-only JSON/binary storage", async () => {
 	expect(cube.identity?.appId).toBe("dev-app");
 	const available = cube.compartments.find(box =>
-		box.enabled && !cube.occupancies.snapshot?.some(o => o.boxNumber === box.number)
+		box.enabled && !cube.occupancies.state.data?.some(o => o.boxNumber === box.number)
 	);
 	expect(available).toBeDefined();
-	const occupancy = await cube.occupancies.occupyBox({
+	const occupancy = await cube.occupancies.occupyCompartment({
 		boxNumber: available!.number,
 		content: {handover: "sdk-native"},
 	});
 	expect(occupancy.state).toBe("pending");
-	await cube.occupancies.confirm(occupancy.uuid, {step: "confirmed"}, true);
+	await cube.occupancies.confirm(occupancy.uuid, {content: {step: "confirmed"}, merge: true});
 	await cube.occupancies.changeAccess(occupancy.uuid, {accessKeys: ["sdk-key"]});
 	await cube.occupancies.update(occupancy.uuid, {content: null});
 	await vi.waitFor(async () => expect((await cube.occupancies.get(occupancy.uuid)).content).toBeNull());

@@ -14,6 +14,7 @@ import type {
 	OccupancyEndedMessage,
 	OccupancyUpdatedMessage,
 	StorageChunkMessage,
+	StorageItem,
 	StorageItemMessage,
 	StorageItemRemovedMessage,
 } from "./messages.js";
@@ -26,9 +27,11 @@ import type {
 	CodeEvent,
 	CodeReaderConfig,
 	Compartment,
+	CompartmentFeature,
 	CompartmentsEvent,
 	ConnectionState,
 	Cube,
+	CubeEventMap,
 	CubeIdentity,
 	CubeStorage,
 	Device,
@@ -43,29 +46,17 @@ import type {
 	OccupancyState,
 	OpenContext,
 	OpenEvent,
-	StorageEvent,
-	StorageItem,
 } from "./types.js";
 
-interface EventMap {
-	code: CodeEvent;
-	lock: LockEvent;
-	open: OpenEvent;
-	close: CloseEvent;
-	compartments: CompartmentsEvent;
-	devices: DevicesEvent;
-	occupancies: OccupancyState;
-	identity: IdentityEvent;
-	storage: StorageEvent;
-	state: ConnectionState;
-	availability: AvailabilityEvent;
-	occupancyCreated: OccupancyChangedEvent;
-	occupancyUpdated: OccupancyChangedEvent;
-	occupancyAccessChanged: OccupancyChangedEvent;
-	occupancyEnded: OccupancyEndedEvent;
-}
+type ListenerRegistry = { [E in keyof CubeEventMap]: Array<EventListener<CubeEventMap[E]>> };
 
-type ListenerRegistry = { [E in keyof EventMap]: Array<EventListener<EventMap[E]>> };
+/** The SDK names required features like `Compartment.features`; the controller takes one flag per feature. */
+const FEATURE_FLAGS: Record<CompartmentFeature, string> = {
+	ACCESSIBLE: "accessible",
+	COOLED: "cooled",
+	DANGEROUS_GOODS: "dangerousGoods",
+	CHARGER: "charger",
+};
 
 const STORAGE_ITEM_BYTES = 1048576 + 4096;
 const STORAGE_TOTAL_BYTES = 68 * 1048576;
@@ -146,16 +137,12 @@ export class CubeImpl implements Cube {
 			get state() {
 				return cube.#occupancyState;
 			},
-			get snapshot() {
-				return cube.#occupancyState.data;
+			occupyType: ({features, ...request}) => {
+				const flags = Object.fromEntries((features ?? []).map(feature => [FEATURE_FLAGS[feature], true]));
+				return this.#request({"@type": "occupyType", ...request, ...flags}, true);
 			},
-			occupy: request =>
-				"boxNumber" in request
-					? this.occupancies.occupyBox(request)
-					: this.occupancies.occupyType(request),
-			occupyType: request => this.#request({"@type": "occupyType", ...request}, true),
-			occupyBox: request => this.#request({"@type": "occupyBox", ...request}, true),
-			confirm: (uuid, content, merge) => this.#request({"@type": "confirmOccupancy", uuid, content, merge}, true),
+			occupyCompartment: request => this.#request({"@type": "occupyBox", ...request}, true),
+			confirm: (uuid, options) => this.#request({"@type": "confirmOccupancy", uuid, ...options}, true),
 			cancel: uuid => this.#request({"@type": "cancelOccupancy", uuid}, true),
 			update: (uuid, options) => this.#request({"@type": "updateOccupancy", uuid, ...options}, true),
 			changeAccess: (uuid, options) => this.#request({"@type": "changeOccupancyAccess", uuid, ...options}, true),
@@ -274,7 +261,7 @@ export class CubeImpl implements Cube {
 			this.#dispatchEvent("identity", {identity: this.#identity});
 			this.#dispatchEvent("compartments", {compartments: this.#compartments});
 			this.#dispatchEvent("devices", {devices: this.#devices});
-			this.#dispatchEvent("occupancies", this.#occupancyState);
+			this.#dispatchEvent("occupancies", {occupancies: this.#occupancyState});
 			this.#dispatchAvailability();
 		});
 		this.#on<WireBoundary>("ready", event => {
@@ -476,7 +463,7 @@ export class CubeImpl implements Cube {
 		const storageChanged = force || !sameAvailability(this.#storageState, storage);
 		if (occupancyChanged) {
 			this.#occupancyState = nextOccupancy;
-			this.#dispatchEvent("occupancies", this.#occupancyState);
+			this.#dispatchEvent("occupancies", {occupancies: this.#occupancyState});
 		}
 		if (storageChanged) this.#storageState = storage;
 		if (occupancyChanged || storageChanged) this.#dispatchAvailability();
@@ -488,7 +475,7 @@ export class CubeImpl implements Cube {
 
 	#setOccupancyState(state: OccupancyState) {
 		this.#occupancyState = state;
-		this.#dispatchEvent("occupancies", state);
+		this.#dispatchEvent("occupancies", {occupancies: state});
 		this.#dispatchAvailability();
 	}
 
@@ -670,15 +657,11 @@ export class CubeImpl implements Cube {
 		return this.#state;
 	}
 
-	setBoxMaintenance(boxNumber: string, required: boolean): Promise<void> {
+	setCompartmentMaintenance(compartmentNumber: string, required: boolean): Promise<void> {
 		return this.#request(
-			{"@type": "updateBoxMaintenance", boxNumber, maintenanceRequired: required},
+			{"@type": "updateBoxMaintenance", boxNumber: compartmentNumber, maintenanceRequired: required},
 			true,
 		);
-	}
-
-	requireBoxMaintenance(boxNumber: string): Promise<void> {
-		return this.setBoxMaintenance(boxNumber, true);
 	}
 
 	close() {
@@ -688,7 +671,7 @@ export class CubeImpl implements Cube {
 		this.#client.stop();
 	}
 
-	#dispatchEvent<E extends keyof EventMap>(eventName: E, event: EventMap[E]) {
+	#dispatchEvent<E extends keyof CubeEventMap>(eventName: E, event: CubeEventMap[E]) {
 		for (const listener of [...this.#listeners[eventName]]) {
 			try {
 				listener(event);
@@ -699,11 +682,12 @@ export class CubeImpl implements Cube {
 		}
 	}
 
-	addEventListener<E extends keyof EventMap>(eventName: E, listener: EventListener<EventMap[E]>) {
+	addEventListener<E extends keyof CubeEventMap>(eventName: E, listener: EventListener<CubeEventMap[E]>) {
 		this.#listeners[eventName].push(listener);
+		return () => this.removeEventListener(eventName, listener);
 	}
 
-	removeEventListener<E extends keyof EventMap>(eventName: E, listener: EventListener<EventMap[E]>) {
+	removeEventListener<E extends keyof CubeEventMap>(eventName: E, listener: EventListener<CubeEventMap[E]>) {
 		this.#listeners[eventName] = this.#listeners[eventName].filter(l => l !== listener) as ListenerRegistry[E];
 	}
 
@@ -722,7 +706,7 @@ export class CubeImpl implements Cube {
 
 	async configureCodeReader(config: CodeReaderConfig) {
 		const {valid, errors} = validateCodeReaderConfig(config);
-		if (!valid) throw new Error(`Invalid code reader configuration: ${errors.join("; ")}`);
+		if (!valid) throw new CubeError("INVALID_REQUEST", `Invalid code reader configuration: ${errors.join("; ")}`);
 		await this.#request({"@type": "configureCodeReader", config}, true);
 	}
 
@@ -731,15 +715,17 @@ export class CubeImpl implements Cube {
 	}
 
 	async openCompartment(compartmentNumber: string, context?: OpenContext) {
+		if (!this.getCompartment(compartmentNumber)) {
+			throw new CubeError("NOT_FOUND", `Compartment ${compartmentNumber} not found`);
+		}
 		const lock = this.getCompartmentLock(compartmentNumber);
-		if (!lock) throw new Error(`Compartment ${compartmentNumber} has no lock`);
+		if (!lock) throw new CubeError("NOT_FOUND", `Compartment ${compartmentNumber} has no lock`);
 		await this.openLock(lock, context);
 	}
 
 	getCompartmentLock(compartmentNumber: string) {
 		const compartment = this.getCompartment(compartmentNumber);
-		if (!compartment) throw new Error(`Compartment ${compartmentNumber} not found`);
-		return this.#secondary ? compartment.secondaryLock : compartment.lock;
+		return this.#secondary ? compartment?.secondaryLock : compartment?.lock;
 	}
 
 	getCompartment(compartmentNumber: string) {

@@ -2,8 +2,9 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import fixture from "../../../test/fixtures/controller-wire.json";
 import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
+import type {StorageItem} from "../src/messages.js";
 import {ControllerSession} from "../src/session.js";
-import type {CubeIdentity, Occupancy, StorageItem} from "../src/types.js";
+import type {CubeIdentity, Occupancy} from "../src/types.js";
 
 class Socket {
 	static instances: Socket[] = [];
@@ -326,7 +327,7 @@ describe("pushed state and local reads", () => {
 		cube.close();
 		await Promise.all(failures);
 		expect(cube.identity).toBeUndefined();
-		expect(cube.occupancies.snapshot).toBeUndefined();
+		expect(cube.occupancies.state.data).toBeUndefined();
 	});
 });
 
@@ -341,18 +342,28 @@ describe("commands and authentication", () => {
 			content: {handover: "h1"},
 			actor: "customer",
 			action: "dropoff",
+		};
+		const allocated = cube.occupancies.occupyType({
+			...request,
+			features: ["COOLED", "ACCESSIBLE", "CHARGER", "DANGEROUS_GOODS"],
+		});
+		expect(JSON.parse(socket.request("occupyType").slice(15))).toEqual({
+			"@type": "occupyType",
+			...request,
 			cooled: true,
 			accessible: true,
 			charger: true,
 			dangerousGoods: true,
-		};
-		const allocated = cube.occupancies.occupy(request);
-		expect(JSON.parse(socket.request("occupyType").slice(15))).toEqual({"@type": "occupyType", ...request});
+		});
 		socket.reply(socket.request("occupyType"), occupancy());
 		await expect(allocated).resolves.toEqual(occupancy());
 		const operations: Array<[string, Promise<unknown>, object]> = [
-			["occupyBox", cube.occupancies.occupy({boxNumber: "1", content: {}}), {boxNumber: "1", content: {}}],
-			["confirmOccupancy", cube.occupancies.confirm("one", {confirmed: true}, true), {
+			[
+				"occupyBox",
+				cube.occupancies.occupyCompartment({boxNumber: "1", content: {}}),
+				{boxNumber: "1", content: {}},
+			],
+			["confirmOccupancy", cube.occupancies.confirm("one", {content: {confirmed: true}, merge: true}), {
 				uuid: "one",
 				content: {confirmed: true},
 				merge: true,
@@ -385,7 +396,7 @@ describe("commands and authentication", () => {
 			socket.reply(frame, type === "occupyBox" ? occupancy() : undefined);
 			await promise;
 		}
-		const required = cube.requireBoxMaintenance("1");
+		const required = cube.setCompartmentMaintenance("1", true);
 		expect(JSON.parse(socket.request("updateBoxMaintenance").slice(15))).toEqual({
 			"@type": "updateBoxMaintenance",
 			boxNumber: "1",
@@ -393,7 +404,7 @@ describe("commands and authentication", () => {
 		});
 		socket.reply(socket.request("updateBoxMaintenance"));
 		await required;
-		const cleared = cube.setBoxMaintenance("1", false);
+		const cleared = cube.setCompartmentMaintenance("1", false);
 		expect(JSON.parse(socket.request("updateBoxMaintenance").slice(15)).maintenanceRequired).toBe(false);
 		socket.reply(socket.request("updateBoxMaintenance"));
 		await cleared;
@@ -408,7 +419,7 @@ describe("commands and authentication", () => {
 		});
 		socket.reply(socket.request("openLock"), fixture.reply, "NAK");
 		await failure;
-		const mutation = cube.occupancies.occupyBox({boxNumber: "1"});
+		const mutation = cube.occupancies.occupyCompartment({boxNumber: "1"});
 		const unknown = expect(mutation).rejects.toMatchObject({code: "COMMAND_OUTCOME_UNKNOWN"});
 		await vi.advanceTimersByTimeAsync(10000);
 		await unknown;
@@ -487,7 +498,7 @@ describe("commands and authentication", () => {
 		socket.event({"@type": "occupancyEnded", uuid: "one", revision: 99});
 		await flush();
 		expect(cube.state.status).toBe("initializing");
-		expect(cube.occupancies.snapshot).toBeUndefined();
+		expect(cube.occupancies.state.data).toBeUndefined();
 		socket = Socket.instances[1];
 		socket.open();
 		await ready();

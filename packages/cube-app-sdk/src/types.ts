@@ -204,6 +204,7 @@ export type OccupancyContent = Record<string, unknown>;
 export interface Occupancy {
 	uuid: string;
 	appId: string;
+	/** The number of the occupied compartment (`Compartment.number`). The controller calls compartments boxes. */
 	boxNumber: string;
 	accessCode: string | null;
 	accessKeys: string[];
@@ -220,31 +221,35 @@ export interface AccessCodeShape {
 	length: number;
 }
 
-export interface OccupyCommon extends OpenContext {
+/** Options shared by both ways of allocating a compartment. */
+export interface OccupyOptions extends OpenContext {
 	accessCode?: string;
 	accessCodeShape?: AccessCodeShape;
 	accessKeys?: string[];
 	content?: OccupancyContent | null;
 }
 
-export interface OccupyType extends OccupyCommon {
+/** Lets the controller choose a free compartment of the requested type. */
+export interface OccupyTypeRequest extends OccupyOptions {
 	type: string;
 	group?: string;
-	accessible?: boolean;
-	cooled?: boolean;
-	dangerousGoods?: boolean;
-	charger?: boolean;
+	/** Features the allocated compartment must have. */
+	features?: CompartmentFeature[];
 }
 
-export interface OccupyBox extends OccupyCommon {
+/** Allocates one specific compartment. */
+export interface OccupyCompartmentRequest extends OccupyOptions {
+	/** The compartment number; named like `Occupancy.boxNumber`. */
 	boxNumber: string;
 }
 
-export type OccupyRequest = OccupyType | OccupyBox;
-
-export interface UpdateOccupancyOptions extends OpenContext {
+export interface ConfirmOccupancyOptions {
 	content?: OccupancyContent | null;
+	/** Merge `content` into the existing content instead of replacing it. */
 	merge?: boolean;
+}
+
+export interface UpdateOccupancyOptions extends ConfirmOccupancyOptions, OpenContext {
 }
 
 export interface ChangeOccupancyAccessOptions extends OpenContext {
@@ -264,12 +269,11 @@ export interface OccupancyState extends AvailabilityState {
 }
 
 export interface Occupancies {
+	/** The live snapshot (`state.data`) and its availability. */
 	readonly state: OccupancyState;
-	readonly snapshot: Occupancy[] | undefined;
-	occupy(request: OccupyRequest): Promise<Occupancy>;
-	occupyType(request: OccupyType): Promise<Occupancy>;
-	occupyBox(request: OccupyBox): Promise<Occupancy>;
-	confirm(uuid: string, content?: OccupancyContent | null, merge?: boolean): Promise<void>;
+	occupyType(request: OccupyTypeRequest): Promise<Occupancy>;
+	occupyCompartment(request: OccupyCompartmentRequest): Promise<Occupancy>;
+	confirm(uuid: string, options?: ConfirmOccupancyOptions): Promise<void>;
 	cancel(uuid: string): Promise<void>;
 	update(uuid: string, options: UpdateOccupancyOptions): Promise<void>;
 	changeAccess(uuid: string, options: ChangeOccupancyAccessOptions): Promise<void>;
@@ -277,13 +281,6 @@ export interface Occupancies {
 	/** Reads the latest pushed snapshot, optionally matching accessCode or an access key. */
 	list(access?: string): Promise<Occupancy[]>;
 	get(uuid: string): Promise<Occupancy>;
-}
-
-export interface StorageItem {
-	key: string;
-	contentType: string;
-	encoding: "json" | "base64";
-	content: unknown;
 }
 
 /** Controller-backed, Center-write-only storage. No browser persistence is used. */
@@ -299,8 +296,13 @@ export interface IdentityEvent {
 	identity: CubeIdentity | undefined;
 }
 
-export interface StorageEvent {
+/** A storage key was written or deleted; read it again. Not the DOM `StorageEvent`. */
+export interface StorageChangedEvent {
 	key: string;
+}
+
+export interface OccupanciesEvent {
+	occupancies: OccupancyState;
 }
 
 export interface AvailabilityEvent {
@@ -308,12 +310,36 @@ export interface AvailabilityEvent {
 	storage: AvailabilityState;
 }
 
+/**
+ * Payload of `occupancyCreated`, `occupancyUpdated` and `occupancyAccessChanged`. The names follow the controller:
+ * confirming a pending reservation also arrives as `occupancyCreated`, carrying the confirmed occupancy.
+ */
 export interface OccupancyChangedEvent {
 	occupancy: Occupancy;
 }
 
+/** The occupancy left the snapshot: it was ended, or a pending reservation was cancelled. */
 export interface OccupancyEndedEvent {
 	uuid: string;
+}
+
+/** Maps every event name to its payload. */
+export interface CubeEventMap {
+	open: OpenEvent;
+	close: CloseEvent;
+	lock: LockEvent;
+	code: CodeEvent;
+	compartments: CompartmentsEvent;
+	devices: DevicesEvent;
+	occupancies: OccupanciesEvent;
+	identity: IdentityEvent;
+	storage: StorageChangedEvent;
+	state: ConnectionState;
+	availability: AvailabilityEvent;
+	occupancyCreated: OccupancyChangedEvent;
+	occupancyUpdated: OccupancyChangedEvent;
+	occupancyAccessChanged: OccupancyChangedEvent;
+	occupancyEnded: OccupancyEndedEvent;
 }
 
 export interface Cube {
@@ -323,57 +349,30 @@ export interface Cube {
 	readonly state: ConnectionState;
 	/** Reads the current pushed token for the installed app; rejects expired tokens. Never sends a refresh request. */
 	getToken(): Promise<string>;
-	setBoxMaintenance(boxNumber: string, required: boolean): Promise<void>;
-	requireBoxMaintenance(boxNumber: string): Promise<void>;
+	/** Marks a compartment as requiring maintenance, or clears the mark. */
+	setCompartmentMaintenance(compartmentNumber: string, required: boolean): Promise<void>;
 
 	/**
 	 * Adds an event listener.
 	 * @param eventName The event name
 	 * @param listener The event listener
+	 * @return A function that removes the listener again.
 	 */
-	addEventListener(eventName: "open", listener: EventListener<OpenEvent>): void;
-	addEventListener(eventName: "close", listener: EventListener<CloseEvent>): void;
-	addEventListener(eventName: "lock", listener: EventListener<LockEvent>): void;
-	addEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
-	addEventListener(eventName: "compartments", listener: EventListener<CompartmentsEvent>): void;
-	addEventListener(eventName: "devices", listener: EventListener<DevicesEvent>): void;
-	addEventListener(eventName: "occupancies", listener: EventListener<OccupancyState>): void;
-	addEventListener(eventName: "identity", listener: EventListener<IdentityEvent>): void;
-	addEventListener(eventName: "storage", listener: EventListener<StorageEvent>): void;
-	addEventListener(eventName: "state", listener: EventListener<ConnectionState>): void;
-	addEventListener(eventName: "availability", listener: EventListener<AvailabilityEvent>): void;
-	addEventListener(eventName: "occupancyCreated", listener: EventListener<OccupancyChangedEvent>): void;
-	addEventListener(eventName: "occupancyUpdated", listener: EventListener<OccupancyChangedEvent>): void;
-	addEventListener(eventName: "occupancyAccessChanged", listener: EventListener<OccupancyChangedEvent>): void;
-	addEventListener(eventName: "occupancyEnded", listener: EventListener<OccupancyEndedEvent>): void;
+	addEventListener<E extends keyof CubeEventMap>(eventName: E, listener: EventListener<CubeEventMap[E]>): () => void;
 
 	/**
 	 * Removes an event listener.
 	 * @param eventName The event name
 	 * @param listener The event listener
 	 */
-	removeEventListener(eventName: "open", listener: EventListener<OpenEvent>): void;
-	removeEventListener(eventName: "close", listener: EventListener<CloseEvent>): void;
-	removeEventListener(eventName: "lock", listener: EventListener<LockEvent>): void;
-	removeEventListener(eventName: "code", listener: EventListener<CodeEvent>): void;
-	removeEventListener(eventName: "compartments", listener: EventListener<CompartmentsEvent>): void;
-	removeEventListener(eventName: "devices", listener: EventListener<DevicesEvent>): void;
-	removeEventListener(eventName: "occupancies", listener: EventListener<OccupancyState>): void;
-	removeEventListener(eventName: "identity", listener: EventListener<IdentityEvent>): void;
-	removeEventListener(eventName: "storage", listener: EventListener<StorageEvent>): void;
-	removeEventListener(eventName: "state", listener: EventListener<ConnectionState>): void;
-	removeEventListener(eventName: "availability", listener: EventListener<AvailabilityEvent>): void;
-	removeEventListener(eventName: "occupancyCreated", listener: EventListener<OccupancyChangedEvent>): void;
-	removeEventListener(eventName: "occupancyUpdated", listener: EventListener<OccupancyChangedEvent>): void;
-	removeEventListener(eventName: "occupancyAccessChanged", listener: EventListener<OccupancyChangedEvent>): void;
-	removeEventListener(eventName: "occupancyEnded", listener: EventListener<OccupancyEndedEvent>): void;
+	removeEventListener<E extends keyof CubeEventMap>(eventName: E, listener: EventListener<CubeEventMap[E]>): void;
 
 	/**
 	 * Open the locks with the specified id.
 	 * @param lock The lock id
 	 * @param context The context of the open command
 	 * @return A promise that resolves when the open command was successfully handled by the locking hardware.
-	 * @throws Error if the open command could not be passed to the locking hardware.
+	 * @throws CubeError if the open command could not be passed to the locking hardware.
 	 */
 	openLock(lock: string, context?: OpenContext): Promise<void>;
 
@@ -382,7 +381,7 @@ export interface Cube {
 	 * @param compartmentNumber The compartment number
 	 * @param context The context of the open command
 	 * @return A promise that resolves when the open command was successfully handled by the locking hardware.
-	 * @throws Error if the compartment cannot be found, it does not have a lock configured, or the open command could not be passed to the locking hardware.
+	 * @throws CubeError if the compartment cannot be found, it does not have a lock configured, or the open command could not be passed to the locking hardware.
 	 */
 	openCompartment(compartmentNumber: string, context?: OpenContext): Promise<void>;
 
@@ -399,9 +398,9 @@ export interface Cube {
 	getCompartment(compartmentNumber: string): Compartment | undefined;
 
 	/**
-	 * Returns the lock of the specified compartment.
+	 * Returns the lock of the specified compartment; the secondary lock if the app runs on the secondary side.
 	 * @param compartmentNumber The compartment number
-	 * @return The lock assigned to this compartment.
+	 * @return The lock, or undefined if the compartment was not found or has no such lock.
 	 */
 	getCompartmentLock(compartmentNumber: string): string | undefined;
 
@@ -423,21 +422,21 @@ export interface Cube {
 	/**
 	 * Restarts the user interface of the cube.
 	 * @return A promise that resolves when the restart command was successfully issued.
-	 * @throws Error if the restart command could not be passed to the service.
+	 * @throws CubeError if the restart command could not be passed to the service.
 	 */
 	restartUserInterface(): Promise<void>;
 
 	/**
 	 * Restarts the operating system of the cube.
 	 * @return A promise that resolves when the restart command was successfully issued.
-	 * @throws Error if the restart command could not be passed to the service.
+	 * @throws CubeError if the restart command could not be passed to the service.
 	 */
 	restartOperatingSystem(): Promise<void>;
 
 	/**
 	 * Restarts the controller service of the cube.
 	 * @return A promise that resolves when the restart command was successfully issued.
-	 * @throws Error if the restart command could not be passed to the service.
+	 * @throws CubeError if the restart command could not be passed to the service.
 	 */
 	restartController(): Promise<void>;
 
@@ -445,7 +444,7 @@ export interface Cube {
 	 * Restarts the specified device (driver).
 	 * @param deviceId The id of the device to restart.
 	 * @return A promise that resolves when the restart command was successfully issued.
-	 * @throws Error if the restart command could not be passed to the service.
+	 * @throws CubeError if the restart command could not be passed to the service.
 	 */
 	restartDevice(deviceId: string): Promise<void>;
 
@@ -461,7 +460,7 @@ export interface Cube {
 	 *
 	 * @param config The standardized code reader configuration to apply.
 	 * @return A promise that resolves when the config was successfully passed to the service.
-	 * @throws Error if the config fails validation, or if the message could not be passed to the service.
+	 * @throws CubeError if the config fails validation, or if the message could not be passed to the service.
 	 */
 	configureCodeReader(config: CodeReaderConfig): Promise<void>;
 

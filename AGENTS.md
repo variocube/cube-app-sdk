@@ -127,7 +127,7 @@ Controller renewals arrive via `cube`; `expiresAt` is epoch seconds. Generation 
 before fetch/OpenAPI calls, never persist or log it. Business state remains in the controller, not browser storage.
 
 React hooks share `CubeProvider`: `useOccupancies`, `useOccupancy`, `useStorageItem`, `useStorageValue`,
-`useCubeIdentity`. Storage has an additional `not-found` result; value-only reads cannot establish business absence.
+`useIdentity`. Storage has an additional `not-found` result; value-only reads cannot establish business absence.
 Subscriptions and caches belong to the provider/SDK lifecycle and must discard late asynchronous results.
 
 ## Publishing

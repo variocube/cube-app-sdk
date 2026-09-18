@@ -60,7 +60,7 @@ Snapshots replace the list; creation, updates, access changes, ending, and cance
 without retaining the previous result. Disconnect and app changes clear both occupancy hooks until an authoritative
 snapshot arrives.
 
-`useCubeIdentity()` returns `CubeIdentity | undefined`, follows identity and token renewal events, and clears on disconnect.
+`useIdentity()` returns `CubeIdentity | undefined`, follows identity and token renewal events, and clears on disconnect.
 An unresolved or replaced app invalidates its session and clears identity. Display cube/app IDs and expiry metadata;
 never log or render bearer tokens. Obtain a current token immediately before a backend request:
 

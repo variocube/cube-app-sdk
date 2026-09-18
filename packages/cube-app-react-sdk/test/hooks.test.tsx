@@ -12,14 +12,7 @@ import {
 import React, {act} from "react";
 import {createRoot, Root} from "react-dom/client";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
-import {
-	CubeProvider,
-	useCubeIdentity,
-	useOccupancies,
-	useOccupancy,
-	useStorageItem,
-	useStorageValue,
-} from "../src/index";
+import {CubeProvider, useIdentity, useOccupancies, useOccupancy, useStorageItem, useStorageValue} from "../src/index";
 
 vi.mock("@variocube/cube-app-sdk", async importOriginal => ({
 	...await importOriginal<typeof import("@variocube/cube-app-sdk")>(),
@@ -70,6 +63,7 @@ class TestCube {
 		const listeners = this.listeners.get(name) ?? new Set();
 		listeners.add(listener);
 		this.listeners.set(name, listeners);
+		return () => this.removeEventListener(name, listener);
 	}
 	removeEventListener(name: string, listener: (event: unknown) => void) {
 		this.listeners.get(name)?.delete(listener);
@@ -79,7 +73,7 @@ class TestCube {
 	}
 	setOccupancies(state: OccupancyState) {
 		this.occupancies.state = state;
-		this.emit("occupancies", state);
+		this.emit("occupancies", {occupancies: state});
 	}
 	setApp(identity: CubeIdentity | undefined, status: AvailabilityState["status"] = "loading") {
 		this.identity = identity;
@@ -141,7 +135,7 @@ function StorageProbe({documentKey}: { documentKey: string }) {
 function OccupancyProbe({uuid = "one"}: { uuid?: string }) {
 	const result = useOccupancies();
 	const selected = useOccupancy(uuid);
-	const identity = useCubeIdentity();
+	const identity = useIdentity();
 	return <output>{JSON.stringify({result, selected, identity})}</output>;
 }
 

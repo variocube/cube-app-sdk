@@ -33,8 +33,8 @@ import {
 	useCompartments,
 	useConnected,
 	useCube,
-	useCubeIdentity,
 	useDevices,
+	useIdentity,
 	useLockEvent,
 	useLocks,
 	useOccupancies,
@@ -208,7 +208,7 @@ function App({session}: { session: import("@variocube/cube-app-sdk").ControllerS
 }
 
 function IdentityCard() {
-	const identity = useCubeIdentity();
+	const identity = useIdentity();
 	return (
 		<Paper sx={{p: 3}}>
 			<Typography variant="h2">Controller identity</Typography>
@@ -246,7 +246,7 @@ function describeError(error: unknown): string {
 
 function OccupancyCard() {
 	const cube = useCube();
-	const identity = useCubeIdentity();
+	const identity = useIdentity();
 	const occupancies = useOccupancies();
 	const [boxNumber, setBoxNumber] = useState("1");
 	const [busy, setBusy] = useState(false);
@@ -266,7 +266,7 @@ function OccupancyCard() {
 		setMessage(undefined);
 		try {
 			if (operation === "allocate") {
-				const created = await cube.occupancies.occupyBox({
+				const created = await cube.occupancies.occupyCompartment({
 					boxNumber,
 					content: {demoReference: attempt.reference},
 				});
@@ -424,7 +424,7 @@ function StorageCard() {
 
 function StorageBlobPreview({documentKey}: { documentKey: string }) {
 	const cube = useCube();
-	const identity = useCubeIdentity();
+	const identity = useIdentity();
 	const generation = useRef(0);
 	const [details, setDetails] = useState<string>();
 	useEffect(() => {

@@ -40,7 +40,7 @@ obtains a fresh launch when the old session is lost. A consumed URL cannot authe
 ## Domain APIs
 
 ```typescript
-const reservation = await cube.occupancies.occupyBox({boxNumber: "1", content: {handover: "reference"}});
+const reservation = await cube.occupancies.occupyCompartment({boxNumber: "1", content: {handover: "reference"}});
 await cube.occupancies.confirm(reservation.uuid, {confirmed: true}, true);
 await cube.occupancies.changeAccess(reservation.uuid, {accessKeys: ["access-reference"]});
 await cube.occupancies.update(reservation.uuid, {content: null});
