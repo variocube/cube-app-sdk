@@ -1,26 +1,30 @@
 import {
 	CodeEvent,
 	Compartment,
-	CompartmentsEvent,
 	connect,
+	ConnectionState,
+	ConnectionStatus,
 	ConnectOptions,
+	ControllerSession,
 	Cube,
+	CubeError,
+	CubeIdentity,
 	Device,
-	DevicesEvent,
 	EventListener,
 	LockEvent,
 	LockStatus,
+	Occupancy,
 } from "@variocube/cube-app-sdk";
-import React, {createContext, PropsWithChildren, useContext, useEffect, useMemo, useState} from "react";
+import React, {createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState} from "react";
 
 // Re-export the SDK's types via `export type *` so runtime values like `connect` are NOT
 // re-exported — React SDK consumers should use CubeProvider instead of connecting directly.
-// The two runtime values that are genuinely useful (the `Symbology` enum and
-// `validateCodeReaderConfig`) are re-exported explicitly below.
+// What an app needs at runtime is re-exported explicitly below: session bootstrap (call it before
+// loading React), error handling and the reader configuration helpers.
 // `dprint-ignore` because dprint 0.77.0 wrongly strips the `type` from `export type *`.
 // dprint-ignore
 export type * from "@variocube/cube-app-sdk";
-export { Symbology, validateCodeReaderConfig } from "@variocube/cube-app-sdk";
+export { bootstrapSession, CubeError, Symbology, validateCodeReaderConfig } from "@variocube/cube-app-sdk";
 
 export type Locks = Record<string, LockStatus>;
 
@@ -44,10 +48,23 @@ const CubeContext = createContext<CubeContextContent>({
  * @param props The properties
  */
 export function CubeProvider(props: PropsWithChildren<ConnectOptions>) {
+	// A changed session owns a new connection and subtree. Never render the old cube's
+	// identity or business data while the replacement connection is being established.
+	return <CubeConnection key={`${sessionKey(props.session)}:${props.secondary}`} {...props} />;
+}
+
+const sessionKeys = new WeakMap<ControllerSession, number>();
+let nextSessionKey = 0;
+
+function sessionKey(session: ControllerSession) {
+	if (!sessionKeys.has(session)) sessionKeys.set(session, nextSessionKey++);
+	return sessionKeys.get(session);
+}
+
+function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 	const {
 		children,
-		host,
-		port,
+		session,
 		secondary,
 	} = props;
 
@@ -58,29 +75,25 @@ export function CubeProvider(props: PropsWithChildren<ConnectOptions>) {
 	const [locks, setLocks] = useState<Record<string, LockStatus>>({});
 
 	useEffect(() => {
-		const open = () => setConnected(true);
-		const close = () => setConnected(false);
-		const lock = ({lock, status}: LockEvent) => setLocks(prev => ({...prev, [lock]: status}));
-		const compartments = ({compartments}: CompartmentsEvent) => setCompartments(compartments);
-		const devices = ({devices}: DevicesEvent) => setDevices(devices);
-
-		const cube = connect({host, port, secondary});
-		cube.addEventListener("open", open);
-		cube.addEventListener("close", close);
-		cube.addEventListener("compartments", compartments);
-		cube.addEventListener("devices", devices);
-		cube.addEventListener("lock", lock);
+		const cube = connect({session, secondary});
+		const unsubscribe = [
+			cube.addEventListener("open", () => setConnected(true)),
+			cube.addEventListener("close", () => setConnected(false)),
+			cube.addEventListener("compartments", ({compartments}) => setCompartments(compartments)),
+			cube.addEventListener("devices", ({devices}) => setDevices(devices)),
+			cube.addEventListener("lock", ({lock, status}) => setLocks(prev => ({...prev, [lock]: status}))),
+		];
+		setConnected(cube.connected);
+		setCompartments(cube.compartments);
+		setDevices(cube.devices);
+		setLocks({});
 		setCube(cube);
 
 		return () => {
-			cube.removeEventListener("open", open);
-			cube.removeEventListener("close", close);
-			cube.removeEventListener("compartments", compartments);
-			cube.removeEventListener("devices", devices);
-			cube.removeEventListener("lock", lock);
+			unsubscribe.forEach(remove => remove());
 			cube.close();
 		};
-	}, [host, port, secondary]);
+	}, [session, secondary]);
 
 	const value = useMemo(() => ({
 		cube,
@@ -165,10 +178,7 @@ export function useLocks() {
  */
 export function useCodeEvent(listener: EventListener<CodeEvent>) {
 	const cube = useCube();
-	useEffect(() => {
-		cube.addEventListener("code", listener);
-		return () => cube.removeEventListener("code", listener);
-	}, [cube, listener]);
+	useEffect(() => cube.addEventListener("code", listener), [cube, listener]);
 }
 
 /**
@@ -177,8 +187,105 @@ export function useCodeEvent(listener: EventListener<CodeEvent>) {
  */
 export function useLockEvent(listener: EventListener<LockEvent>) {
 	const cube = useCube();
+	useEffect(() => cube.addEventListener("lock", listener), [cube, listener]);
+}
+
+/**
+ * Data that is only known while the connection is ready. Any other status carries no data, so loading or a lost
+ * connection is never mistaken for empty or absent data.
+ */
+export type CubeResult<T> =
+	| { status: "ready"; data: T; error?: undefined }
+	| { status: Exclude<ConnectionStatus, "ready">; data?: undefined; error?: CubeError };
+
+type Subscription = (cube: Cube, listener: () => void) => () => void;
+
+function useCubeSnapshot<T>(read: (cube: Cube) => T, subscribe: Subscription): T {
+	const cube = useCube();
+	const [snapshot, setSnapshot] = useState(() => ({cube, read, value: read(cube)}));
 	useEffect(() => {
-		cube.addEventListener("lock", listener);
-		return () => cube.removeEventListener("lock", listener);
-	});
+		const update = () => setSnapshot({cube, read, value: read(cube)});
+		const unsubscribe = subscribe(cube, update);
+		// Subscribe first, then read: an event between render and effect must not be lost.
+		update();
+		return unsubscribe;
+	}, [cube, read, subscribe]);
+	// Never return what was read from a previous cube or for a previous key.
+	return snapshot.cube === cube && snapshot.read === read ? snapshot.value : read(cube);
+}
+
+function readResult<T>(cube: Cube, read: () => T): CubeResult<T> {
+	const {status, error} = cube.connection;
+	if (status !== "ready") return {status, error};
+	try {
+		return {status, data: read()};
+	}
+	catch (cause) {
+		return {
+			status: "error",
+			error: cause instanceof CubeError ? cause : new CubeError("INTERNAL_ERROR", String(cause)),
+		};
+	}
+}
+
+const readConnection = (cube: Cube) => cube.connection;
+const subscribeConnection: Subscription = (cube, listener) => cube.addEventListener("connection", listener);
+
+/** Authentication and snapshot readiness; `useConnected()` is the shorthand for status `ready`. */
+export function useConnectionState(): ConnectionState {
+	return useCubeSnapshot(readConnection, subscribeConnection);
+}
+
+const readIdentity = (cube: Cube) => cube.identity;
+const subscribeIdentity: Subscription = (cube, listener) => cube.addEventListener("identity", listener);
+
+/** The cube and installed app; undefined while unknown. Tokens come from `useCube().getToken()`. */
+export function useIdentity(): CubeIdentity | undefined {
+	return useCubeSnapshot(readIdentity, subscribeIdentity);
+}
+
+const readOccupancies = (cube: Cube) => readResult(cube, () => cube.occupancies.list());
+const subscribeOccupancies: Subscription = (cube, listener) => {
+	const unsubscribe = [
+		cube.addEventListener("occupancies", listener),
+		cube.addEventListener("connection", listener),
+	];
+	return () => unsubscribe.forEach(remove => remove());
+};
+
+/** The controller's live, authoritative occupancies. A ready empty array means there are none. */
+export function useOccupancies(): CubeResult<Occupancy[]> {
+	return useCubeSnapshot(readOccupancies, subscribeOccupancies);
+}
+
+/** One occupancy; ready with undefined data means the controller has none with this UUID. */
+export function useOccupancy(uuid: string): CubeResult<Occupancy | undefined> {
+	const result = useOccupancies();
+	return useMemo(
+		() => result.status === "ready" ? {...result, data: result.data.find(o => o.uuid === uuid)} : result,
+		[result, uuid],
+	);
+}
+
+/**
+ * A JSON value from storage, following writes and deletions. Ready with undefined data means the key is missing or
+ * deleted; a stored JSON null is ready with null.
+ */
+export function useStorageItem<T>(key: string): CubeResult<T | undefined> {
+	const read = useCallback((cube: Cube) => readResult(cube, () => cube.storage.get<T>(key)), [key]);
+	const subscribe = useCallback<Subscription>((cube, listener) => {
+		const unsubscribe = [
+			cube.addEventListener("storage", event => {
+				if (event.key === key) listener();
+			}),
+			cube.addEventListener("connection", listener),
+		];
+		return () => unsubscribe.forEach(remove => remove());
+	}, [key]);
+	return useCubeSnapshot(read, subscribe);
+}
+
+/** Value-only convenience. Use useStorageItem to establish absence for business decisions. */
+export function useStorageValue<T>(key: string): T | undefined {
+	return useStorageItem<T>(key).data;
 }

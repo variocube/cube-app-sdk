@@ -1,260 +1,102 @@
-# cube-app-sdk
+# Cube App SDK
 
-SDK for developing apps that run on Variocube lockers.
+The next SDK major (2) connects browser and React applications directly to Rust controller major 6. Identity,
+occupancies, read-only app storage and hardware operations are mandatory. The controller replaces production
+`cube-app-service`; the Node service and Java-era mock remain historical compatibility tools for SDK 1.
 
-## What is a cube app?
+This branch implements the browser part of [controller-rs stage 3](https://github.com/variocube/controller-rs/issues/5).
+It is unreleased and depends on the coordinated controller and kiosk changes. Package versions stay `0.0.0` until
+release stamping. See [provenance and validation](docs/controller-6.md).
 
-A cube app is a web application that runs in a browser on a Variocube locker and uses its features.
+## Authentication before application startup
 
-The web application must be hosted on a public URL (like https://yourapp.com/variocube).
+Kiosk obtains a short-lived, single-use grant through the controller's Unix socket. The server resolves the installed
+app and configured app URL. The grant wraps the original fragment; reusable credentials never enter query parameters.
+Call `bootstrapSession` before importing the router, analytics or application modules. It synchronously restores
+clean history, exchanges the grant, and keeps the local API credential in memory.
 
-It may use Web APIs to provide offline functionality. Specifically, the following APIs are supported on Variocubes:
+```typescript
+import {bootstrapSession} from "@variocube/cube-app-sdk";
 
-- [Service Worker API](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
-- [Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API)
+void bootstrapSession({endpoint: "http://localhost:9000"}).then(async session => {
+	const {renderApp} = await import("./app");
+	renderApp(session);
+});
+```
 
-It can access the hardware features of the locker it runs on, like opening locks or receiving codes
-from a QR-code reader.
+App code calls `connect({session})`; React renders `<CubeProvider session={session}>`. Configure the controller endpoint
+in app code. HTTP is restricted to loopback; remote endpoints require HTTPS. URL parameters cannot select controller
+identity, app ID, audience or terminal. `secondary: true` selects secondary locks on the authenticated cube.
 
-Check out our [⭐⭐⭐ Demo App ⭐⭐⭐](https://variocube.github.io/cube-app-sdk/) for a quick overview of what is possible.
+The first `/app` WebSocket message authenticates protocol major 6. No hardware command or subscription is usable until
+an authoritative initial snapshot arrives. `cube.connection` / `useConnectionState()` expose `disconnected`,
+`initializing`, `ready`, `unavailable` (a fresh kiosk launch is required), and `error`. This is the only readiness model:
+`cube.connected`, the `open`/`close` events, local reads and every React hook follow it.
 
-## How does it work?
+`error` is not terminal. A failure a reconnect can resolve — a timed-out or malformed snapshot, a controller domain that
+dropped away — holds the reason on `connection.error` and rebuilds the connection from a fresh socket ten seconds later,
+so one bad moment does not strand the app until the kiosk relaunches it. Only `AUTHENTICATION_REQUIRED` (`unavailable`)
+and `PROTOCOL_MISMATCH` (`error`) stay put, because a fresh kiosk launch or new software is required. Values a newer
+controller adds to a closed list are dropped rather than failing: an unknown compartment feature or device type is
+omitted from that compartment or device, and an unknown lock status or code source drops its own event.
 
-When running on a Variocube, your web application will be able to communicate with a local service,
-the `cube-app-service`, which provides access to the hardware features on the locker. This SDK encapsulates
-the communication with this service and provides a simple API for interacting with the locker.
+Local API credentials renew 30 seconds before expiry. Backend app JWTs come from `cube.getToken()` and have the exact
+installed app audience. They are separate from local API credentials, Center identity proofs and technician sessions.
+Never persist or log credentials or business state. Reload loses memory credentials; kiosk's trusted launch monitor
+obtains a fresh launch when the old session is lost. A consumed URL cannot authenticate again.
 
-## Using the SDK
+## Domain APIs
 
-Add the package `@variocube/cube-app-sdk` to your web application and use it to interface with the Variocube locker.
+```typescript
+const reservation = await cube.occupancies.occupyCompartment({boxNumber: "1", content: {handover: "reference"}});
+await cube.occupancies.confirm(reservation.uuid, {content: {confirmed: true}, merge: true});
+await cube.occupancies.changeAccess(reservation.uuid, {accessKeys: ["access-reference"]});
+await cube.occupancies.update(reservation.uuid, {content: null});
+await cube.openCompartment(reservation.boxNumber, {actor: "customer", action: "collect"});
+await cube.occupancies.end(reservation.uuid, {gracePeriod: 30});
+```
 
-If you are using React in your app, we advise using the `@variocube/cube-app-react-sdk` instead. It is a simple
-React wrapper (context provider + hooks) around the SDK.
+Allocation and physical opening are separate. Opening acceptance does not establish observed door state; use lock
+events. `occupyType`, `cancel`, `setCompartmentMaintenance`, reader configuration, device events and retained restart commands use the
+same authenticated connection. `occupyCompartment` allocates one specific compartment, `occupyType({type, features?})`
+lets the controller choose one with the same `CompartmentFeature` values as `Compartment.features`. The controller calls
+compartments boxes: `boxNumber` is a `Compartment.number`. Authorization is enforced by the controller.
+
+`occupancies.list(access?)` and `occupancies.get(uuid)` are synchronous reads of the latest pushed snapshot; `get`
+returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown
+snapshot is never mistaken for an empty one. A local read can trail a just-acknowledged mutation until its publication
+arrives. Lifecycle events follow the controller's names: a confirmation arrives as `occupancyCreated`, a cancellation
+as `occupancyEnded`. `addEventListener` returns a function that removes the listener. An end carries only a `uuid`,
+so the snapshot is what scopes it to the installed app: an end for a UUID this app does not hold is not dispatched,
+while one that cannot be attributed at all — no snapshot yet — is dispatched rather than swallowing a real end.
+
+Lost mutation replies produce `COMMAND_OUTCOME_UNKNOWN`. Reconcile a known UUID or handover reference with fresh
+controller publications; the SDK never replays mutations after disconnect, timeout or cancellation. Generation changes clear
+identity, snapshots and caches. Per-session contiguous publication revisions detect gaps and trigger a fresh snapshot;
+these revisions do not promise global equality across sessions.
+
+Storage is Center-write-only and read synchronously. `cube.storage.get<T>(key)` preserves JSON `null` and returns
+`undefined` for missing/deleted keys; pass a validator as `get(key, schema.parse)` instead of asserting `T`.
+`getBlob(key)` preserves binary bytes and content type; `keys()` lists keys. The SDK retains the complete bounded app
+snapshot in memory and applies pushed values/deletions; initialization finishes only at the controller's `ready`
+barrier. No read method sends a `get*` request.
+
+`cube.identity` is `{cubeId, appId}`. The backend JWT is deliberately not part of it, of any event or of any hook
+result: `await cube.getToken()` immediately before each backend request is the only way to obtain it. It reads the
+current pushed JWT and rejects a wrong or expired audience without exposing a Center token. The controller pushes token
+rotations; they are not identity changes.
+
+## Native development and checks
+
+Download the matching native controller candidate and start an isolated instance:
 
 ```shell
-npm install @variocube/cube-app-sdk
-
-# Or, in a React app:
-npm install @variocube/cube-app-react-sdk
+controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/my-controller
+npm ci
+npm run dev --workspace packages/cube-app-demo
+CONTROLLER_URL=http://localhost:9000 CONTROLLER_KIOSK_SOCKET=/tmp/my-controller/kiosk.sock npm run test:controller
 ```
 
-During development, you will need to use the virtual cube provided by the SDK. You can start it with:
-
-```shell
-npx @variocube/cube-app-service
-```
-
-The virtual cube will be available at [http://localhost:4000/](http://localhost:4000/).
-
-You might want to take a look at the [source code of the demo app](packages/cube-app-demo) that is included in this repository.
-
-### Connecting to the Variocube locker
-
-A single call to the `connect` function provides access to all platform features:
-
-```typescript
-import {connect} from "@variocube/cube-app-sdk";
-
-// Connect to the cube
-const cube = connect();
-```
-
-### Opening a compartment
-
-```typescript
-await cube.openCompartment("1");
-```
-
-### Receiving code events
-
-```typescript
-// Add a listener for code events
-cube.addEventListener("code", async ({code}) => {
-	// Open box 1 on the correct code
-	if (code == "12345") {
-		await cube.openCompartment("1");
-	}
-});
-```
-
-### Receiving lock events
-
-```typescript
-// Add a listener for code events
-cube.addEventListener("lock", async ({compartmentNumber, status}) => {
-	console.log(`Compartment ${compartmentNumber} is now ${status}`);
-});
-```
-
-### Retrieving compartments
-
-```typescript
-// Retrieve compartments of the cube
-const compartments = cube.compartments;
-for (const compartment of compartments) {
-	await cube.openCompartment(compartment.number);
-}
-```
-
-### Retrieving devices
-
-```typescript
-const devices = cube.devices;
-for (const device of devices) {
-	console.log(`Device ${device.id} is a ${device.types.join(", ")}`);
-}
-```
-
-### Restarting
-
-```typescript
-// Restart the operating system
-await cube.restartOperatingSystem();
-
-// Restart the user interface
-await cube.restartUserInterface();
-```
-
-### Configuring the code reader
-
-Push a standardized configuration to the connected code reader(s) — symbologies, indicators,
-trigger & timing, and output formatting. The config may be partial: the driver overlays it on its
-default profile and applies what the reader supports, silently skipping unsupported properties.
-
-```typescript
-import {Symbology} from "@variocube/cube-app-sdk";
-
-await cube.configureCodeReader({
-	symbologies: {
-		[Symbology.QR]: true,
-		[Symbology.Code128]: true,
-		[Symbology.EAN13]: false,
-	},
-	indicators: {
-		beeper: {enabled: true, volume: 80}, // volume/brightness are percentages, 0–100
-		led: {enabled: true, brightness: 50},
-	},
-	outputFormatting: {
-		terminator: "CRLF",
-	},
-});
-```
-
-The config is validated before it is sent. If it is invalid, `configureCodeReader` throws
-synchronously and nothing is sent:
-
-```typescript
-try {
-	await cube.configureCodeReader({indicators: {beeper: {volume: 150}}});
-}
-catch (error) {
-	// Error: Invalid code reader configuration: indicators.beeper.volume must be between 0 and 100
-}
-```
-
-You can run the same validation yourself, e.g. to give feedback in a settings UI before sending:
-
-```typescript
-import {validateCodeReaderConfig} from "@variocube/cube-app-sdk";
-
-const {valid, errors} = validateCodeReaderConfig(config);
-```
-
-> The config is applied to all connected code readers; there is no per-device targeting. In v1 the
-> driver only logs which properties it applied, skipped, or failed — no structured success/failure
-> result is returned to the app yet.
-
-## Handling error conditions
-
-### No connection to cube app service
-
-In case the cube app service is not available or the connection is lost, you cannot use any data or commands.
-
-```typescript
-// You can check the `connected` property
-if (!cube.conntected) {
-	console.error("Not connected to cube app service.");
-}
-// You can attach an event listener to get notified when the connection is lost
-cube.addEventListener("close", () => console.error("Connection to cube app service lost."));
-```
-
-### No compartments
-
-If a cube does not have compartments, it is either unconfigured, or the connection to the service that is managing compartments
-could not be established or was lost.
-
-```typescript
-// You can check the length of the `compartments` property
-if (cube.compartments.length == 0) {
-	console.error("No compartments.");
-}
-// You can attach an event listener to get notified when the compartments change
-cube.addEventListener("compartments", ({compartments}) => {
-	if (compartments.length == 0) {
-		console.error("There are no longer any compartments.");
-	}
-});
-```
-
-### Device not available
-
-If an attached device stops working, it is removed from the list of devices. You can check whether a device
-that is necessary for your application is present:
-
-```typescript
-// Find a specific device in the list of devices
-const reader = cube.devices.find(device => device.types.includes("BarcodeReader"));
-if (!reader) {
-	console.error("No reader present.");
-}
-// Attach an event to get notified when the devices change
-cube.addEventListener("devices", ({devices}) => {
-	const reader = devices.find(device => device.types.includes("BarcodeReader"));
-	if (!reader) {
-		console.error("Reader no longer present.");
-	}
-});
-```
-
-### Lock status `BLOCKED`
-
-If a lock does not open, even though an open command was sent to it, it can be marked as `BLOCKED`. This typically happens
-when the compartment door is mechanically blocked from opening.
-
-```typescript
-// Handle the `BLOCKED` status in a lock event handler
-cube.addEventListener("lock", ({lock, status}) => {
-	if (status == "BLOCKED") {
-		console.error(`Lock ${lock} is blocked. Are you leaning against the door?`);
-	}
-});
-```
-
-### Lock status `BREAKIN`
-
-If a lock is opened without a prior open command, it can be marked as `BREAKIN`.
-
-```typescript
-// Handle the `BLOCKED` status in a lock event handler
-cube.addEventListener("lock", ({lock, status}) => {
-	if (status == "BREAKIN") {
-		console.error(`Break-in alert at lock ${lock}!`);
-	}
-});
-```
-
-## Limitations
-
-When using this SDK and the underlying services, the following limitations apply compared to other Variocube applications.
-
-### Single app only
-
-Only a single app is supported. It is not possible to run multiple apps on the Variocube locker
-or use existing Variocube apps alongside your app. However, you can implement a variety of use-cases
-within your app.
-
-### Bring Your Own (Basic) Features
-
-Basic Variocube features that are commonly used across Variocube apps, like maintenance of compartments, location code,
-maintenance codes, or the settings menu, are not supported. Your app needs to implement all required features.
+The trusted development launcher or kiosk must deliver the issued app URL; opening the clean app URL alone cannot
+mint credentials. The native runtime owns domain state and hardware simulation. See [test instructions](test/README.md)
+for local checks and evidence limits. No Java or production `cube-app-service` is used by the new SDK workflow.

@@ -2,3 +2,6 @@ node_modules/
 esm/
 dist/
 dpkg/
+
+/test-results/
+/playwright-report/

@@ -1,0 +1,22 @@
+{
+  "requestFrame": "MSG000000000001{\"@type\":\"getStorageItem\",\"key\":\"missing\"}",
+  "replyPrefix": "NAK000000000001",
+  "reply": {
+    "type": "about:blank",
+    "title": "Not Found",
+    "status": 404,
+    "detail": "Storage item not found.",
+    "instance": null,
+    "properties": null,
+    "code": "NOT_FOUND",
+    "message": "Storage item not found."
+  },
+  "storage": [
+    {"key":"json","contentType":"application/json","encoding":"json","content":{"value":42}},
+    {"key":"null","contentType":"application/json","encoding":"json","content":null},
+    {"key":"binary","contentType":"application/octet-stream","encoding":"base64","content":"AP9B"}
+  ],
+  "capabilities": {"@type":"capabilities","occupancies":true,"storage":true,"identity":true},
+  "emptySnapshot": {"@type":"occupancies","occupancies":[]},
+  "invalidation": {"@type":"storageItemChanged","key":"json"}
+}

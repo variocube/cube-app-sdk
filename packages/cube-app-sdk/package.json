@@ -21,7 +21,8 @@
   "homepage": "https://github.com/variocube/cube-app-sdk#readme",
   "dependencies": {
     "@variocube/driver-common": "^2.8.0",
-    "@variocube/vcmp": "^4.0.0"
+    "@variocube/vcmp": "^4.0.0",
+    "zod": "^4.6.5"
   },
   "files": [
     "esm/**"

@@ -21,6 +21,12 @@ npm run dev
 # Run tests
 npm run test
 
+# Type-check packages, demo and tests
+npm run typecheck
+
+# Opt-in real-controller acceptance (see test/README.md)
+npm run test:controller
+
 # Format code with dprint
 npx dprint fmt
 
@@ -70,7 +76,16 @@ The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service
 - `Compartment`: Describes a locker compartment with lock assignments
 - `Device`: Hardware devices (BarcodeReader, Keypad, NfcReader, etc.)
 - `LockStatus`: "OPEN" | "CLOSED" | "BREAKIN" | "BLOCKED"
-- Events: `code`, `lock`, `open`, `close`, `compartments`, `devices`
+- Events (`CubeEventMap`): hardware events plus `connection`, `identity`, `occupancies`, lifecycle events, and `storage`
+- `cube.occupancies`: controller-owned reservation/confirmation/cancellation/update/access/end lifecycle and snapshots
+- `cube.storage`: Center-write-only JSON/blob reads from full pushed values/deletions; memory caches only
+- Reads (`occupancies.list/get`, `storage.get/getBlob/keys`) are synchronous; absent is `undefined`, not ready throws
+- `cube.identity` (`cubeId`, `appId`) / `getToken()`: the token is never part of identity, events or hook results
+- `cube.connection`: the only readiness model (`disconnected`, `initializing`, `ready`, `unavailable`, `error`);
+  `connected`, `open`/`close` and every hook follow it; unknown data is never represented as loaded-empty
+- `error` is recoverable: transient failures keep the reason and reconnect after 10s. Only `AUTHENTICATION_REQUIRED`
+  and `PROTOCOL_MISMATCH` are terminal. Enum values a newer controller adds are dropped (unknown feature/device type
+  omitted, unknown lock status/code source drops its event), never failed — a closed list would brick installed apps
 
 ## Code Style
 
@@ -88,7 +103,41 @@ This project follows Variocube coding standards.
 
 ## Testing
 
-Currently no unit tests are configured. The test script is a placeholder.
+`npm test` runs Vitest SDK, relay/runtime, and React component tests. `npm run typecheck` checks source and tests
+against workspace source aliases. CI runs both alongside the normal package builds.
+
+`test/fixtures/controller-wire.json` is the byte-identical controller wire fixture (provenance in its README).
+Do not format this shared fixture independently. `test/real-controller.test.ts` is opt-in and exercises the real
+native Rust development fixture through a retained local VCMP kiosk driver; see `test/README.md` for startup instructions.
+
+Keep extension requests controller-only: `/mock` has no occupancy/storage authority or signed identity. Raw VCMP
+debug logging exposes bearer tokens and must stay disabled even at verbose service log levels. Mock scans can feed
+UI tests; a real door cycle must reach controller `/test/locks`, not just the service mock.
+
+## Extension contract and recovery
+
+Exactly one installed Center app is resolved by the controller; requests cannot select `appId` or token audience.
+Use the actual controller `api/app` message classes: occupancy states are `pending`, `confirmed`, `ended`,
+confirmation upserts via `occupancyCreated`, and cancellation removes pending reservations via `occupancyEnded`.
+Preserve full nullable occupancy fields and content. The service caches snapshots in memory and relays typed ACK
+results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`). Both layers scope
+occupancies to the installed app by filtering foreign entries out of a snapshot, never by dropping the snapshot.
+`occupancyEnded` carries no `appId`, so the snapshot attributes it; an unattributable end is still dispatched.
+
+On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
+Controller 6 has no capability discovery. Authentication/initial-state and commands have 10-second deadlines.
+Lost mutation replies are `COMMAND_OUTCOME_UNKNOWN`; never replay allocate/open/end automatically. Reconcile UUIDs
+or handover references with fresh controller reads. Controller 6 provides contiguous per-session publication revisions; these do not promise global equality across sessions.
+
+`getToken()` reads only the current pushed token and rejects expired/wrong-audience values without sending a request.
+Controller renewals arrive via `cube`; `expiresAt` is epoch seconds. Generation changes clear credentials. Read a token immediately
+before fetch/OpenAPI calls, never persist or log it. Business state remains in the controller, not browser storage.
+
+React hooks share `CubeProvider`: `useOccupancies`, `useOccupancy`, `useStorageItem`, `useStorageValue`,
+`useIdentity`, `useConnectionState`. Data hooks return `CubeResult<T>`: `data` only with status `ready`, where
+`undefined` establishes absence; value-only reads cannot. Keep wire sequencing (generation/revision) and credentials
+out of public state and events. `ControllerSession` is a public interface; credential handling stays on the internal
+`ControllerSessionImpl`. `session.close()` also ends every connection made from it.
 
 ## Publishing
 
@@ -101,3 +150,11 @@ repo stay at `0.0.0` — the published version comes from the release tag.
    - publishes the public packages to npm (`lerna publish from-package`) under `@variocube`,
    - builds the `cube-app-service` `.deb` and uploads it to the apt repository,
    - deploys the demo to GitHub Pages.
+
+## Rust controller major 6 integration
+
+The new SDK replaces production cube-app-service with direct authenticated `/app`. Read `docs/controller-6.md` for
+wire/provenance and `test/README.md` for native checks. SDK major 2 requires protocol 6. Bootstrap before importing
+router/analytics, never trust URL-selected app/terminal/audience, and never persist or log grants, API credentials or JWTs.
+The Node package is legacy-only; its internal capability contract does not reintroduce negotiation into the new SDK.
+Use `useConnectionState()` for authenticated readiness. Physical kiosk and release acceptance remain separately evidenced.
