@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Lerna monorepo containing the Variocube Cube App SDK - a toolkit for developing web applications that run on Variocube smart lockers. The SDK enables web apps to communicate with locker hardware (locks, barcode readers, keypads, NFC readers) through a local WebSocket service.
+This is a Lerna monorepo containing the Variocube Cube App SDK - a toolkit for developing web applications that run on Variocube smart lockers. The SDK enables web apps to communicate with locker hardware (locks, barcode readers, keypads, NFC readers) over an authenticated WebSocket connection to the locker controller.
 
 ## Common Commands
 
@@ -33,8 +33,8 @@ npx dprint fmt
 # Check formatting
 npx dprint check
 
-# Start virtual cube for development
-npx @variocube/cube-app-service
+# Start a controller for development (see test/README.md)
+variocube-controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/sdk-controller
 
 # Release new version
 ./release.sh
@@ -45,9 +45,7 @@ npx @variocube/cube-app-service
 ```bash
 # Build/dev specific package
 cd packages/cube-app-sdk && npm run build
-cd packages/cube-app-service && npm run dev  # Starts with verbose logging (-vvv)
 cd packages/cube-app-demo && npm run dev     # Vite dev server
-cd packages/cube-app-mock && npm run dev     # Mock UI dev server
 ```
 
 ## Architecture
@@ -56,19 +54,17 @@ cd packages/cube-app-mock && npm run dev     # Mock UI dev server
 
 - **cube-app-sdk** (`@variocube/cube-app-sdk`): Core SDK providing the `connect()` function and `Cube` interface for locker communication
 - **cube-app-react-sdk** (`@variocube/cube-app-react-sdk`): React wrapper with `CubeProvider` context and hooks (`useCube`, `useCompartments`, `useLocks`, `useCodeEvent`, etc.)
-- **cube-app-service** (`@variocube/cube-app-service`): Node.js gateway service that bridges the SDK to actual locker hardware via VCMP protocol. Also serves a mock UI for development
-- **cube-app-mock**: React UI for simulating locker hardware during development (private, not published)
 - **cube-app-demo**: Demo application showcasing SDK features (private, deployed to GitHub Pages)
 
 ### Communication Flow
 
 ```
-Web App (SDK) ←→ WebSocket ←→ cube-app-service ←→ VCMP ←→ Locker Controller
-                    ↓
-              Mock UI (for development)
+Web App (SDK) ←→ authenticated /app WebSocket ←→ Locker Controller (controller-rs)
 ```
 
-The SDK uses VCMP (Variocube Communication Protocol) over WebSocket. The service listens on port 4000 by default and can connect to either a real locker controller (port 9000) or the mock UI for development.
+The SDK uses VCMP (Variocube Communication Protocol) over WebSocket, connecting directly to the controller on port
+9000. The Node gateway service that used to sit in between was removed once `controller-rs` absorbed its
+functionality; hardware simulation for development comes from the controller's own `dev --fixture` mode.
 
 ### Key Types
 
@@ -103,25 +99,25 @@ This project follows Variocube coding standards.
 
 ## Testing
 
-`npm test` runs Vitest SDK, relay/runtime, and React component tests. `npm run typecheck` checks source and tests
+`npm test` runs Vitest SDK and React component tests. `npm run typecheck` checks source and tests
 against workspace source aliases. CI runs both alongside the normal package builds.
 
 `test/fixtures/controller-wire.json` is the byte-identical controller wire fixture (provenance in its README).
 Do not format this shared fixture independently. `test/real-controller.test.ts` is opt-in and exercises the real
 native Rust development fixture through a retained local VCMP kiosk driver; see `test/README.md` for startup instructions.
 
-Keep extension requests controller-only: `/mock` has no occupancy/storage authority or signed identity. Raw VCMP
-debug logging exposes bearer tokens and must stay disabled even at verbose service log levels. Mock scans can feed
-UI tests; a real door cycle must reach controller `/test/locks`, not just the service mock.
+Keep extension requests controller-only. Raw VCMP debug logging exposes bearer tokens and must stay disabled even at
+verbose log levels. Simulated scans from the controller's development fixture can feed UI tests; a real door cycle must
+reach controller `/test/locks`.
 
 ## Extension contract and recovery
 
 Exactly one installed Center app is resolved by the controller; requests cannot select `appId` or token audience.
 Use the actual controller `api/app` message classes: occupancy states are `pending`, `confirmed`, `ended`,
 confirmation upserts via `occupancyCreated`, and cancellation removes pending reservations via `occupancyEnded`.
-Preserve full nullable occupancy fields and content. The service caches snapshots in memory and relays typed ACK
-results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`). Both layers scope
-occupancies to the installed app by filtering foreign entries out of a snapshot, never by dropping the snapshot.
+Preserve full nullable occupancy fields and content. The SDK caches snapshots in memory and surfaces typed ACK
+results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`). Occupancies are scoped
+to the installed app by filtering foreign entries out of a snapshot, never by dropping the snapshot.
 `occupancyEnded` carries no `appId`, so the snapshot attributes it; an unattributable end is still dispatched.
 
 On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
@@ -148,13 +144,12 @@ repo stay at `0.0.0` — the published version comes from the release tag.
 2. The `release: published` event triggers CI, which:
    - stamps the tag's version into every package via `lerna version --no-git-tag-version`,
    - publishes the public packages to npm (`lerna publish from-package`) under `@variocube`,
-   - builds the `cube-app-service` `.deb` and uploads it to the apt repository,
    - deploys the demo to GitHub Pages.
 
 ## Rust controller major 6 integration
 
-The new SDK replaces production cube-app-service with direct authenticated `/app`. Read `docs/controller-6.md` for
-wire/provenance and `test/README.md` for native checks. SDK major 2 requires protocol 6. Bootstrap before importing
-router/analytics, never trust URL-selected app/terminal/audience, and never persist or log grants, API credentials or JWTs.
-The Node package is legacy-only; its internal capability contract does not reintroduce negotiation into the new SDK.
+The SDK connects directly to the controller's authenticated `/app`; the Node gateway service it replaced has been
+removed from this repo. Read `docs/controller-6.md` for wire/provenance and `test/README.md` for native checks. SDK
+major 2 requires protocol 6. Bootstrap before importing router/analytics, never trust URL-selected
+app/terminal/audience, and never persist or log grants, API credentials or JWTs.
 Use `useConnectionState()` for authenticated readiness. Physical kiosk and release acceptance remain separately evidenced.

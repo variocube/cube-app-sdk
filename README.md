@@ -1,8 +1,9 @@
 # Cube App SDK
 
 The next SDK major (2) connects browser and React applications directly to Rust controller major 6. Identity,
-occupancies, read-only app storage and hardware operations are mandatory. The controller replaces production
-`cube-app-service`; the Node service and Java-era mock remain historical compatibility tools for SDK 1.
+occupancies, read-only app storage and hardware operations are mandatory. The controller absorbed the Node
+`cube-app-service` gateway, which has been removed from this repo along with its mock UI; SDK 1 users keep the last
+published `@variocube/cube-app-service` 1.x.
 
 This branch implements the browser part of [controller-rs stage 3](https://github.com/variocube/controller-rs/issues/5).
 It is unreleased and depends on the coordinated controller and kiosk changes. Package versions stay `0.0.0` until
@@ -99,4 +100,4 @@ CONTROLLER_URL=http://localhost:9000 npm run test:controller
 
 The trusted development launcher or kiosk must deliver the issued app URL; opening the clean app URL alone cannot
 mint credentials. The native runtime owns domain state and hardware simulation. See [test instructions](test/README.md)
-for local checks and evidence limits. No Java or production `cube-app-service` is used by the new SDK workflow.
+for local checks and evidence limits. No Java or Node gateway service takes part in the SDK workflow.

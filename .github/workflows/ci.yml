@@ -44,15 +44,6 @@ jobs:
     - if: github.event_name == 'release'
       run: npx lerna publish from-package --yes --no-private
 
-    - run: ./build_debian.sh
-
-    - if: github.event_name == 'release'
-      run: |
-        aws s3 cp --region eu-west-1 dpkg/ s3://og-repository/packages/ --recursive --exclude "*" --include "variocube-cube-app-service_*.deb"
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
     - if: github.event_name == 'release'
       uses: JamesIves/github-pages-deploy-action@v4
       with:
