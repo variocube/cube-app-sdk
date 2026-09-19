@@ -19,6 +19,7 @@ import {
 	useIdentity,
 	useOccupancies,
 	useOccupancy,
+	useOccupancyByIdempotencyKey,
 	useStorageItem,
 	useStorageValue,
 } from "../src/index";
@@ -57,9 +58,17 @@ class TestCube {
 	data: Occupancy[] = [];
 	items = new Map<string, unknown>([["document", "initial"]]);
 	occupancies = {
+		get: (uuid: string) => {
+			this.assertReady();
+			return this.data.find(o => o.uuid === uuid);
+		},
+		getByIdempotencyKey: (key: string) => {
+			this.assertReady();
+			return this.data.find(o => o.idempotencyKey === key);
+		},
 		list: vi.fn(() => {
 			this.assertReady();
-			return this.data;
+			return this.data.filter(o => o.state !== "ended");
 		}),
 	};
 	storage = {
@@ -347,5 +356,29 @@ describe("occupancy, identity and connection hooks", () => {
 
 	it("re-exports the session bootstrap so React apps need no second package", () => {
 		expect(bootstrapSession).toBeTypeOf("function");
+	});
+});
+
+describe("keyed occupancy lookup", () => {
+	it("distinguishes loading, absence and retained ended records independently of active lists", async () => {
+		function Probe() {
+			const keyed = useOccupancyByIdempotencyKey("handover:deposit");
+			const selected = useOccupancy("one");
+			const active = useOccupancies();
+			return <output>{JSON.stringify({keyed, selected, active})}</output>;
+		}
+		cube.connection = {status: "initializing"};
+		await render(<Probe />);
+		expect(output().keyed).toEqual({status: "initializing"});
+		await act(async () => cube.setConnection({status: "ready"}));
+		expect(output().keyed).toEqual({status: "ready"});
+		const ended = occupancy("one", {idempotencyKey: "handover:deposit", state: "ended"});
+		await act(async () => cube.setOccupancies([ended]));
+		expect(output().keyed).toEqual({status: "ready", data: ended});
+		expect(output().selected).toEqual({status: "ready", data: ended});
+		expect(output().active).toEqual({status: "ready", data: []});
+		await act(async () => cube.setConnection({status: "disconnected"}));
+		expect(output().keyed.status).toBe("disconnected");
+		expect(output().keyed.data).toBeUndefined();
 	});
 });

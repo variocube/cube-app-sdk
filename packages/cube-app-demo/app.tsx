@@ -38,6 +38,7 @@ import {
 	useLockEvent,
 	useLocks,
 	useOccupancies,
+	useOccupancyByIdempotencyKey,
 	useStorageItem,
 } from "@variocube/cube-app-react-sdk";
 import {CodeEvent, LockEvent, Occupancy} from "@variocube/cube-app-sdk";
@@ -225,7 +226,7 @@ function IdentityCard() {
 }
 
 interface Recovery {
-	operation: "allocate" | "confirm" | "cancel" | "end";
+	operation: "allocate" | "confirm" | "cancel" | "end" | "patch";
 	reference: string;
 	uuid?: string;
 	cubeId?: string;
@@ -245,6 +246,8 @@ function OccupancyCard() {
 	const identity = useIdentity();
 	const occupancies = useOccupancies();
 	const [boxNumber, setBoxNumber] = useState("1");
+	const [allocationKey, setAllocationKey] = useState("demo:deposit");
+	const keyed = useOccupancyByIdempotencyKey(allocationKey);
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState<string>();
 	const [recovery, setRecovery] = useState<Recovery>();
@@ -253,7 +256,7 @@ function OccupancyCard() {
 	async function mutate(operation: Recovery["operation"], occupancy?: Occupancy) {
 		const attempt: Recovery = {
 			operation,
-			reference: crypto.randomUUID(),
+			reference: operation === "allocate" ? allocationKey : crypto.randomUUID(),
 			uuid: occupancy?.uuid,
 			cubeId: identity?.cubeId,
 			appId: identity?.appId,
@@ -264,11 +267,19 @@ function OccupancyCard() {
 			if (operation === "allocate") {
 				const created = await cube.occupancies.occupyCompartment({
 					boxNumber,
+					idempotencyKey: attempt.reference,
 					content: {demoReference: attempt.reference},
 				});
-				setMessage(`Reserved occupancy ${created.uuid}.`);
+				setMessage(`Allocation key returned ${created.uuid} (${created.state}).`);
 			}
-			else if (occupancy) {
+			else if (occupancy && operation === "patch") {
+				await Promise.all([
+					cube.occupancies.patch(occupancy.uuid, {ledger: {[`${attempt.reference}:left`]: {count: 1}}}),
+					cube.occupancies.patch(occupancy.uuid, {ledger: {[`${attempt.reference}:right`]: {count: 2}}}),
+				]);
+				setMessage("Both patches acknowledged. The published ledger shows both entries.");
+			}
+			else if (occupancy && operation !== "patch") {
 				await cube.occupancies[operation](occupancy.uuid);
 			}
 		}
@@ -289,13 +300,13 @@ function OccupancyCard() {
 		}
 		setBusy(true);
 		try {
-			const current = cube.occupancies.list();
-			const match = current.find(item =>
-				recovery.uuid
-					? item.uuid === recovery.uuid
-					: item.content?.demoReference === recovery.reference
-			);
-			const resolved = recovery.operation === "allocate"
+			const match = recovery.uuid
+				? cube.occupancies.get(recovery.uuid)
+				: cube.occupancies.getByIdempotencyKey(recovery.reference);
+			const ledger = match?.content?.ledger as Record<string, unknown> | undefined;
+			const resolved = recovery.operation === "patch"
+				? !!ledger?.[`${recovery.reference}:left`] && !!ledger?.[`${recovery.reference}:right`]
+				: recovery.operation === "allocate"
 				? !!match
 				: recovery.operation === "confirm"
 				? match?.state === "confirmed"
@@ -352,10 +363,20 @@ function OccupancyCard() {
 						value={boxNumber}
 						onChange={event => setBoxNumber(event.target.value)}
 					/>
+					<TextField
+						label="Allocation key"
+						value={allocationKey}
+						onChange={event => setAllocationKey(event.target.value)}
+					/>
 					<Button variant="contained" disabled={disabled || !boxNumber} onClick={() => mutate("allocate")}>
 						Reserve box
 					</Button>
 				</Stack>
+				<Typography>
+					Key lookup: {keyed.status === "ready"
+						? keyed.data ? `${keyed.data.uuid} (${keyed.data.state})` : "No record"
+						: keyed.status}. Reuse the key to retrieve the same record; change it for a new allocation.
+				</Typography>
 				{occupancies.status === "ready" && occupancies.data?.length === 0 && (
 					<Typography>No occupancies.</Typography>
 				)}
@@ -378,6 +399,14 @@ function OccupancyCard() {
 						>
 							Cancel reservation
 						</Button>
+						<Button
+							disabled={disabled}
+							onClick={() =>
+								mutate("patch", occupancy)}
+						>
+							Concurrent patch
+						</Button>
+						<Typography component="pre">{JSON.stringify(occupancy.content?.ledger)}</Typography>
 						<Button
 							disabled={disabled || occupancy.state !== "confirmed"}
 							onClick={() =>

@@ -75,7 +75,7 @@ functionality; hardware simulation for development comes from the controller's o
 - Events (`CubeEventMap`): hardware events plus `connection`, `identity`, `occupancies`, lifecycle events, and `storage`
 - `cube.occupancies`: controller-owned reservation/confirmation/cancellation/update/access/end lifecycle and snapshots
 - `cube.storage`: Center-write-only JSON/blob reads from full pushed values/deletions; memory caches only
-- Reads (`occupancies.list/get`, `storage.get/getBlob/keys`) are synchronous; absent is `undefined`, not ready throws
+- Reads (`occupancies.list/get/getByIdempotencyKey`, `storage.get/getBlob/keys`) are synchronous; absent is `undefined`, not ready throws
 - `cube.identity` (`cubeId`, `appId`) / `getToken()`: the token is never part of identity, events or hook results
 - `cube.connection`: the only readiness model (`disconnected`, `initializing`, `ready`, `unavailable`, `error`);
   `connected`, `open`/`close` and every hook follow it; unknown data is never represented as loaded-empty
@@ -118,7 +118,9 @@ confirmation upserts via `occupancyCreated`, and cancellation removes pending re
 Preserve full nullable occupancy fields and content. The SDK caches snapshots in memory and surfaces typed ACK
 results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`). Occupancies are scoped
 to the installed app by filtering foreign entries out of a snapshot, never by dropping the snapshot.
-`occupancyEnded` carries no `appId`, so the snapshot attributes it; an unattributable end is still dispatched.
+`occupancyEnded` includes a complete ended occupancy for keyed records; unkeyed ends carry only `uuid`, as does
+an end whose payload the SDK cannot retain. Retained ended records remain readable by UUID/key, bounded at 256
+per connection, oldest dropped; list(), useOccupancies() and the `occupancies` event are active-only.
 
 On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
 Controller 6 has no capability discovery. Authentication/initial-state and commands have 10-second deadlines.

@@ -1,4 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import occupancyWire from "../../../test/fixtures/controller-6-occupancy-wire.json";
 import fixture from "../../../test/fixtures/controller-wire.json";
 import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
@@ -722,4 +723,123 @@ describe("pushed app tokens", () => {
 			expect(socket.requests()).toEqual([]);
 		},
 	);
+});
+
+describe("idempotent occupancy contract", () => {
+	it("retains ended upserts and reconnect snapshots but keeps active lists active-only", async () => {
+		const ended = occupancyWire.ended.occupancy as Occupancy;
+		await ready([occupancy(ended.uuid, {idempotencyKey: ended.idempotencyKey})]);
+		socket.event(occupancyWire.ended);
+		await flush();
+		expect(cube.occupancies.list()).toEqual([]);
+		expect(cube.occupancies.get(ended.uuid)).toEqual(ended);
+		expect(cube.occupancies.getByIdempotencyKey("handover:deposit")).toEqual(ended);
+		expect(cube.occupancies.getByIdempotencyKey("missing")).toBeUndefined();
+		socket.close();
+		expect(() => cube.occupancies.getByIdempotencyKey("handover:deposit")).toThrow();
+		await vi.advanceTimersByTimeAsync(10000);
+		socket = Socket.instances.at(-1)!;
+		socket.open();
+		await ready([ended]);
+		expect(cube.occupancies.getByIdempotencyKey("handover:deposit")).toEqual(ended);
+		socket.event({"@type": "occupancies", occupancies: []});
+		await flush();
+		expect(cube.occupancies.getByIdempotencyKey("handover:deposit")).toBeUndefined();
+	});
+
+	it("sends a distinct patch, waits for publication to update reads, and never replays a lost reply", async () => {
+		await ready([occupancy("occupancy-1", {content: {ledger: {"entry-1": 1}}})]);
+		const {content, actor, action} = occupancyWire.patch;
+		const pending = cube.occupancies.patch("occupancy-1", content, {actor, action});
+		await flush();
+		const frame = socket.request("patchOccupancy");
+		expect(JSON.parse(frame.slice(15))).toEqual(occupancyWire.patch);
+		socket.reply(frame);
+		await pending;
+		expect(cube.occupancies.get("occupancy-1")?.content).toEqual({ledger: {"entry-1": 1}});
+		socket.event({
+			"@type": "occupancyUpdated",
+			occupancy: occupancy("occupancy-1", {content: {ledger: {"entry-2": {count: 2}}}}),
+		});
+		await flush();
+		expect(cube.occupancies.get("occupancy-1")?.content).toEqual({ledger: {"entry-2": {count: 2}}});
+		const lost = cube.occupancies.patch("occupancy-1", {lost: true});
+		const rejected = expect(lost).rejects.toMatchObject({code: "COMMAND_OUTCOME_UNKNOWN"});
+		await flush();
+		socket.close();
+		await rejected;
+		await vi.advanceTimersByTimeAsync(10000);
+		socket = Socket.instances.at(-1)!;
+		socket.open();
+		await ready();
+		expect(
+			Socket.instances.flatMap(client => client.requests()).filter(frame =>
+				JSON.parse(frame.slice(15))["@type"] === "patchOccupancy"
+			),
+		).toHaveLength(2);
+	});
+
+	it("keeps the connection ready for a null key, an unkeyed end and a key lookup without a key", async () => {
+		const listener = vi.fn();
+		// The controller serializes an absent optional field as an explicit null, the way accessCode,
+		// actor and action already arrive; an unkeyed record must not cost the whole snapshot.
+		await ready([{...occupancy("one"), idempotencyKey: null} as unknown as Occupancy]);
+		cube.addEventListener("occupancies", listener);
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.occupancies.list().map(o => o.uuid)).toEqual(["one"]);
+		expect(cube.occupancies.get("one")?.idempotencyKey).toBeUndefined();
+		// An unkeyed record answers no key lookup, whatever the caller passes.
+		expect(cube.occupancies.getByIdempotencyKey("")).toBeUndefined();
+		expect(cube.occupancies.getByIdempotencyKey(undefined as unknown as string)).toBeUndefined();
+		// An end decorated with a record this app cannot retain removes it instead of failing.
+		socket.event({"@type": "occupancyEnded", uuid: "one", occupancy: occupancy("one", {state: "ended"})});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.occupancies.get("one")).toBeUndefined();
+		expect(listener).toHaveBeenLastCalledWith({occupancies: []});
+	});
+
+	it("keeps ended records out of the snapshot event and bounds how many it retains", async () => {
+		const events: Array<string[] | undefined> = [];
+		await ready([occupancy("one", {idempotencyKey: "handover:one"})]);
+		cube.addEventListener("occupancies", ({occupancies}) => events.push(occupancies?.map(o => o.uuid)));
+		socket.event({
+			"@type": "occupancyEnded",
+			uuid: "one",
+			occupancy: occupancy("one", {idempotencyKey: "handover:one", state: "ended"}),
+		});
+		await flush();
+		// The event mirrors list(); the retained record stays reachable by UUID and by key.
+		expect(events).toEqual([[]]);
+		expect(cube.occupancies.getByIdempotencyKey("handover:one")?.uuid).toBe("one");
+		for (let index = 0; index < 256; index++) {
+			socket.event({
+				"@type": "occupancyEnded",
+				uuid: `bulk-${index}`,
+				occupancy: occupancy(`bulk-${index}`, {idempotencyKey: `handover:bulk-${index}`, state: "ended"}),
+			});
+		}
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		// 257 ends, a budget of 256: the oldest is dropped rather than retaining every handover for
+		// the life of the connection. The controller still answers for it if the key is reused.
+		expect(cube.occupancies.getByIdempotencyKey("handover:one")).toBeUndefined();
+		expect(cube.occupancies.getByIdempotencyKey("handover:bulk-0")?.uuid).toBe("bulk-0");
+		expect(cube.occupancies.getByIdempotencyKey("handover:bulk-255")?.uuid).toBe("bulk-255");
+		expect(cube.occupancies.list()).toEqual([]);
+	});
+
+	it("validates keys and object patches before sending and keeps the command byte budget", async () => {
+		await ready();
+		await expect(cube.occupancies.occupyCompartment({boxNumber: "1", idempotencyKey: "x".repeat(129)})).rejects
+			.toMatchObject({code: "INVALID_REQUEST"});
+		for (const content of [null, [], 1]) {
+			await expect(cube.occupancies.patch("one", content as unknown as Record<string, unknown>)).rejects
+				.toMatchObject({code: "INVALID_REQUEST"});
+		}
+		await expect(cube.occupancies.patch("one", {large: "x".repeat(65536)})).rejects.toMatchObject({
+			code: "LIMIT_EXCEEDED",
+		});
+		expect(socket.requests()).toEqual([]);
+	});
 });

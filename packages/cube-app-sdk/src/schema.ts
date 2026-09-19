@@ -9,7 +9,13 @@ export const identitySchema = z.object({
 	token: text.nullable(),
 	expiresAt: integer.nullable(),
 });
+export const idempotencyKeySchema = z.string().refine(value => [...value].length <= 128);
+export const contentPatchSchema = object;
 export const occupancySchema = z.object({
+	// The controller serializes an absent optional occupancy field as an explicit JSON null, the way
+	// `accessCode`, `actor` and `action` already arrive, so an unkeyed record must not fail the whole
+	// snapshot. Null and absent both mean "no key" and are normalized to `undefined`.
+	idempotencyKey: idempotencyKeySchema.nullish().transform(value => value ?? undefined),
 	uuid: text,
 	appId: text,
 	boxNumber: text,
@@ -95,7 +101,9 @@ export const eventSchemas: Record<string, z.ZodType> = {
 	occupancyCreated: z.object({...boundary, occupancy: occupancySchema}),
 	occupancyUpdated: z.object({...boundary, occupancy: occupancySchema}),
 	occupancyAccessChanged: z.object({...boundary, occupancy: occupancySchema}),
-	occupancyEnded: z.object({...boundary, uuid: text}),
+	// A keyed end carries the retained ended record. The handler decides what to do with a payload
+	// that does not match the end, rather than failing the connection over a decorated event.
+	occupancyEnded: z.object({...boundary, uuid: text, occupancy: occupancySchema.optional()}),
 	storageItem: storageSchema.extend(boundary),
 	storageItemRemoved: z.object({...boundary, key: text}),
 	storageChunk: z.object({

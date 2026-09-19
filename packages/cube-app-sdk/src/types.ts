@@ -200,7 +200,15 @@ export interface CubeIdentity {
 export type OccupancyContent = Record<string, unknown>;
 
 /** Complete controller /app occupancy payload, including pending reservations. */
+/** Recursive partial content: null removes a member; arrays are replaced whole. */
+type PatchValue<T> = T extends readonly unknown[] ? T : T extends object ? OccupancyPatch<T> : T;
+export type OccupancyPatch<T extends object = OccupancyContent> = {
+	[K in keyof T]?: PatchValue<T[K]> | null;
+};
+
 export interface Occupancy {
+	/** Opaque allocation identity, scoped to the installed app (at most 128 Unicode characters). */
+	idempotencyKey?: string;
 	uuid: string;
 	appId: string;
 	/** The number of the occupied compartment (`Compartment.number`). The controller calls compartments boxes. */
@@ -222,6 +230,8 @@ export interface AccessCodeShape {
 
 /** Options shared by both ways of allocating a compartment. */
 export interface OccupyOptions extends OpenContext {
+	/** Reusing a retained key returns the existing record in any state, regardless of the other options. */
+	idempotencyKey?: string;
 	accessCode?: string;
 	accessCodeShape?: AccessCodeShape;
 	accessKeys?: string[];
@@ -244,7 +254,7 @@ export interface OccupyCompartmentRequest extends OccupyOptions {
 
 export interface ConfirmOccupancyOptions {
 	content?: OccupancyContent | null;
-	/** Merge `content` into the existing content instead of replacing it. */
+	/** Shallow merge: replaces nested values whole and stores null members; use patch() for recursive deletion. */
 	merge?: boolean;
 }
 
@@ -272,12 +282,20 @@ export interface Occupancies {
 	confirm(uuid: string, options?: ConfirmOccupancyOptions): Promise<void>;
 	cancel(uuid: string): Promise<void>;
 	update(uuid: string, options: UpdateOccupancyOptions): Promise<void>;
+	/** RFC 7396 object patch. A lost reply is COMMAND_OUTCOME_UNKNOWN; never automatically retried. */
+	patch<T extends object = OccupancyContent>(
+		uuid: string,
+		contentPatch: OccupancyPatch<T>,
+		context?: OpenContext,
+	): Promise<void>;
 	changeAccess(uuid: string, options: ChangeOccupancyAccessOptions): Promise<void>;
 	end(uuid: string, options?: EndOccupancyOptions): Promise<void>;
-	/** The current occupancies, optionally only those matching an access code or access key. */
+	/** The active occupancies, optionally only those matching an access code or access key. */
 	list(access?: string): Occupancy[];
-	/** The occupancy, or undefined if the snapshot has none with this UUID. */
+	/** The occupancy in any retained state, including ended; undefined if the snapshot has none with this UUID. */
 	get(uuid: string): Occupancy | undefined;
+	/** Any retained state, including ended; undefined means no record when ready. An empty key never matches. */
+	getByIdempotencyKey(key: string): Occupancy | undefined;
 }
 
 /**
@@ -310,7 +328,11 @@ export interface StorageChangedEvent {
 	key: string;
 }
 
-/** The snapshot changed; undefined when it was cleared because the connection is no longer ready. */
+/**
+ * The snapshot changed; undefined when it was cleared because the connection is no longer ready.
+ * Carries the same active records as `list()`: a retained ended record is reached through `get()`
+ * or `getByIdempotencyKey()`, and its end arrives as `occupancyEnded`.
+ */
 export interface OccupanciesEvent {
 	occupancies: Occupancy[] | undefined;
 }
@@ -323,9 +345,13 @@ export interface OccupancyChangedEvent {
 	occupancy: Occupancy;
 }
 
-/** The occupancy left the snapshot: it was ended, or a pending reservation was cancelled. */
+/**
+ * An occupancy ended/cancelled. Keyed records carry the retained ended snapshot, which stays readable
+ * through `get()` and `getByIdempotencyKey()`; an unkeyed end only removes the UUID.
+ */
 export interface OccupancyEndedEvent {
 	uuid: string;
+	occupancy?: Occupancy;
 }
 
 /** Maps every event name to its payload. */

@@ -1,0 +1,162 @@
+[
+	{
+		"name": "nested merge",
+		"target": {
+			"ledger": {
+				"a": {
+					"count": 1
+				},
+				"b": 2
+			}
+		},
+		"patch": {
+			"ledger": {
+				"a": {
+					"count": 3
+				},
+				"c": 4
+			}
+		},
+		"expected": {
+			"ledger": {
+				"a": {
+					"count": 3
+				},
+				"b": 2,
+				"c": 4
+			}
+		}
+	},
+	{
+		"name": "null deletion",
+		"target": {
+			"a": 1,
+			"nested": {
+				"keep": 2,
+				"remove": 3
+			}
+		},
+		"patch": {
+			"a": null,
+			"nested": {
+				"remove": null
+			}
+		},
+		"expected": {
+			"nested": {
+				"keep": 2
+			}
+		}
+	},
+	{
+		"name": "array replacement",
+		"target": {
+			"a": [
+				1,
+				2
+			]
+		},
+		"patch": {
+			"a": [
+				3
+			]
+		},
+		"expected": {
+			"a": [
+				3
+			]
+		}
+	},
+	{
+		"name": "scalar over object",
+		"target": {
+			"a": {
+				"b": 1
+			}
+		},
+		"patch": {
+			"a": false
+		},
+		"expected": {
+			"a": false
+		}
+	},
+	{
+		"name": "object over scalar",
+		"target": {
+			"a": 3
+		},
+		"patch": {
+			"a": {
+				"b": 1,
+				"absent": null
+			}
+		},
+		"expected": {
+			"a": {
+				"b": 1
+			}
+		}
+	},
+	{
+		"name": "unchanged patch",
+		"target": {
+			"a": {
+				"b": 1
+			}
+		},
+		"patch": {
+			"a": {
+				"b": 1
+			},
+			"missing": null
+		},
+		"expected": {
+			"a": {
+				"b": 1
+			}
+		}
+	},
+	{
+		"name": "delete last key",
+		"target": {
+			"a": 1
+		},
+		"patch": {
+			"a": null
+		},
+		"expected": {}
+	},
+	{
+		"name": "empty patch normalizes null",
+		"target": null,
+		"patch": {},
+		"expected": {}
+	},
+	{
+		"name": "non-object patch rejected",
+		"target": {
+			"a": 1
+		},
+		"patch": [
+			2
+		],
+		"error": "INVALID_PATCH"
+	},
+	{
+		"name": "null patch rejected",
+		"target": {
+			"a": 1
+		},
+		"patch": null,
+		"error": "INVALID_PATCH"
+	},
+	{
+		"name": "scalar patch rejected",
+		"target": {
+			"a": 1
+		},
+		"patch": 3,
+		"error": "INVALID_PATCH"
+	}
+]

@@ -1,0 +1,49 @@
+{
+	"allocate": {
+		"@type": "occupyBox",
+		"boxNumber": "1",
+		"idempotencyKey": "handover:deposit",
+		"content": {
+			"ledger": {
+				"entry-1": 1
+			}
+		}
+	},
+	"patch": {
+		"@type": "patchOccupancy",
+		"uuid": "occupancy-1",
+		"content": {
+			"ledger": {
+				"entry-1": null,
+				"entry-2": {
+					"count": 2
+				}
+			}
+		},
+		"actor": "operator",
+		"action": "stock correction"
+	},
+	"ended": {
+		"@type": "occupancyEnded",
+		"uuid": "occupancy-1",
+		"occupancy": {
+			"uuid": "occupancy-1",
+			"appId": "app-a",
+			"boxNumber": "1",
+			"idempotencyKey": "handover:deposit",
+			"accessCode": null,
+			"accessKeys": [],
+			"created": "2026-09-19T00:00:00Z",
+			"content": {
+				"ledger": {
+					"entry-2": {
+						"count": 2
+					}
+				}
+			},
+			"actor": null,
+			"action": null,
+			"state": "ended"
+		}
+	}
+}

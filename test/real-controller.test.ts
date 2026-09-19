@@ -1,6 +1,9 @@
 import {bootstrapSession, connect, type ControllerSession, type Cube} from "@variocube/cube-app-sdk";
 import {afterAll, beforeAll, expect, test, vi} from "vitest";
 import {WebSocket} from "ws";
+// The SDK refuses to send a non-object patch, so the shared vectors reach the controller only with
+// that client-side guard stubbed. Imported from source, like the packages' own unit tests.
+import {contentPatchSchema} from "../packages/cube-app-sdk/src/schema.js";
 import {MockDriver, MockKiosk} from "./mock-driver";
 
 // Run an isolated native controller dev --fixture single, then set CONTROLLER_URL.
@@ -95,4 +98,82 @@ test("native SDK restarts target the registered local kiosk and ComputeUnit thro
 	]);
 	// These drivers acknowledge only; the test never executes an OS or browser lifecycle action.
 	expect(cube.connection.status).toBe("ready");
+});
+
+test("native keyed allocation, concurrent merge patches and retained ended reconnect", async () => {
+	const key = `sdk-native:${crypto.randomUUID()}:deposit`;
+	const box = cube.compartments.find(box =>
+		box.enabled && !cube.occupancies.list().some(o => o.boxNumber === box.number)
+	)!;
+	const [first, repeated] = await Promise.all([
+		cube.occupancies.occupyCompartment({
+			boxNumber: box.number,
+			idempotencyKey: key,
+			content: {ledger: {remove: 0}},
+		}),
+		cube.occupancies.occupyCompartment({
+			boxNumber: box.number,
+			idempotencyKey: key,
+			content: {ledger: {remove: 0}},
+		}),
+	]);
+	expect(first.uuid).toBe(repeated.uuid);
+	await cube.occupancies.confirm(first.uuid);
+	await Promise.all([
+		cube.occupancies.patch(first.uuid, {ledger: {left: {count: 1}, remove: null}}),
+		cube.occupancies.patch(first.uuid, {ledger: {right: {count: 2}}}),
+	]);
+	await vi.waitFor(() =>
+		expect(cube.occupancies.get(first.uuid)?.content).toEqual({ledger: {left: {count: 1}, right: {count: 2}}})
+	);
+	await cube.occupancies.end(first.uuid);
+	await vi.waitFor(() => expect(cube.occupancies.getByIdempotencyKey(key)?.state).toBe("ended"));
+	expect(cube.occupancies.list().some(o => o.uuid === first.uuid)).toBe(false);
+	cube.close();
+	cube = connect({session});
+	await vi.waitFor(() => expect(cube.connection.status).toBe("ready"), {timeout: 10000});
+	expect(cube.occupancies.getByIdempotencyKey(key)?.uuid).toBe(first.uuid);
+	const ended = await cube.occupancies.occupyType({type: "not-a-type", idempotencyKey: key});
+	expect(ended.uuid).toBe(first.uuid);
+	expect(ended.state).toBe("ended");
+});
+
+test("shared merge-patch vectors against the native controller", async () => {
+	const {default: vectors} = await import("./fixtures/occupancy-merge-patch.json");
+	const box = cube.compartments.find(box =>
+		box.enabled && !cube.occupancies.list().some(o => o.boxNumber === box.number)
+	)!;
+	const record = await cube.occupancies.occupyCompartment({boxNumber: box.number});
+	try {
+		for (const vector of vectors) {
+			await cube.occupancies.update(record.uuid, {content: vector.target});
+			const patch = vector.patch as unknown as Record<string, unknown>;
+			if ("error" in vector) {
+				await expect(cube.occupancies.patch(record.uuid, patch)).rejects.toMatchObject({
+					code: "INVALID_REQUEST",
+				});
+				// Then again on the wire: the fixture is shared with controller-rs to pin the
+				// controller's own rejection, which the local guard would otherwise hide.
+				const guard = vi.spyOn(contentPatchSchema, "safeParse").mockReturnValue({
+					success: true,
+					data: patch,
+				});
+				try {
+					await expect(cube.occupancies.patch(record.uuid, patch)).rejects.toMatchObject({
+						code: vector.error,
+					});
+				}
+				finally {
+					guard.mockRestore();
+				}
+			}
+			else {
+				await cube.occupancies.patch(record.uuid, patch);
+				await vi.waitFor(() => expect(cube.occupancies.get(record.uuid)?.content).toEqual(vector.expected));
+			}
+		}
+	}
+	finally {
+		await cube.occupancies.cancel(record.uuid);
+	}
 });
