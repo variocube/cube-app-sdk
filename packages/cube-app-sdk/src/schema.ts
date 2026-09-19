@@ -9,7 +9,10 @@ export const identitySchema = z.object({
 	token: text.nullable(),
 	expiresAt: integer.nullable(),
 });
+export const idempotencyKeySchema = z.string().refine(value => [...value].length <= 128);
+export const contentPatchSchema = object;
 export const occupancySchema = z.object({
+	idempotencyKey: idempotencyKeySchema.optional(),
 	uuid: text,
 	appId: text,
 	boxNumber: text,
@@ -95,7 +98,10 @@ export const eventSchemas: Record<string, z.ZodType> = {
 	occupancyCreated: z.object({...boundary, occupancy: occupancySchema}),
 	occupancyUpdated: z.object({...boundary, occupancy: occupancySchema}),
 	occupancyAccessChanged: z.object({...boundary, occupancy: occupancySchema}),
-	occupancyEnded: z.object({...boundary, uuid: text}),
+	occupancyEnded: z.object({...boundary, uuid: text, occupancy: occupancySchema.optional()}).refine(event =>
+		!event.occupancy || (event.occupancy.uuid === event.uuid && event.occupancy.state === "ended"
+			&& event.occupancy.idempotencyKey !== undefined)
+	),
 	storageItem: storageSchema.extend(boundary),
 	storageItemRemoved: z.object({...boundary, key: text}),
 	storageChunk: z.object({

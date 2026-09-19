@@ -35,3 +35,6 @@ Expected fixture: installed `dev-app` at `http://localhost:5173/?mode=dev#/home`
 available boxes, `configuration` JSON `{theme:"light"}`, `nullable` JSON null,
 `binary` bytes `[0,1,255]`. Production services, Java and physical drivers are not prerequisites.
 The developer chooses persistent state explicitly; remove/reset only that selected instance when repeating tests.
+
+The occupancy contract tests also exercise keyed allocation retries, concurrent nested patches, retained ended
+records after reconnect, and the shared RFC 7396 vectors against the actual native controller.

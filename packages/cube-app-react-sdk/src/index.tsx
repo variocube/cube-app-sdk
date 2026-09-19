@@ -260,11 +260,14 @@ export function useOccupancies(): CubeResult<Occupancy[]> {
 
 /** One occupancy; ready with undefined data means the controller has none with this UUID. */
 export function useOccupancy(uuid: string): CubeResult<Occupancy | undefined> {
-	const result = useOccupancies();
-	return useMemo(
-		() => result.status === "ready" ? {...result, data: result.data.find(o => o.uuid === uuid)} : result,
-		[result, uuid],
-	);
+	const read = useCallback((cube: Cube) => readResult(cube, () => cube.occupancies.get(uuid)), [uuid]);
+	return useCubeSnapshot(read, subscribeOccupancies);
+}
+
+/** Any retained state. Ready with undefined data means no record for this key; other statuses mean not ready. */
+export function useOccupancyByIdempotencyKey(key: string): CubeResult<Occupancy | undefined> {
+	const read = useCallback((cube: Cube) => readResult(cube, () => cube.occupancies.getByIdempotencyKey(key)), [key]);
+	return useCubeSnapshot(read, subscribeOccupancies);
 }
 
 /**

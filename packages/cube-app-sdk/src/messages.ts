@@ -12,6 +12,7 @@ import type {
 	OccupancyChangedEvent,
 	OccupancyContent,
 	OccupancyEndedEvent,
+	OccupancyPatch,
 	OccupyCompartmentRequest,
 	OccupyOptions,
 	StorageChangedEvent,
@@ -203,4 +204,13 @@ export interface UpdateBoxMaintenanceMessage extends VcmpMessage {
 	"@type": "updateBoxMaintenance";
 	boxNumber: string;
 	maintenanceRequired: boolean;
+}
+
+/** Distinct from updateOccupancy, so an older peer cannot interpret a patch as replacement. */
+export interface PatchOccupancyMessage extends VcmpMessage {
+	"@type": "patchOccupancy";
+	uuid: string;
+	content: OccupancyPatch;
+	actor?: string;
+	action?: string;
 }

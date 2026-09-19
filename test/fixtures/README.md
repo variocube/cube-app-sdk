@@ -19,3 +19,8 @@ The checked-in `controller-wire.json` is historical wire/provenance evidence and
 requires protocol 6 authentication; its session/initial-state tests construct explicit generation/revision envelopes.
 Native acceptance uses Rust controller `single` fixture through `/launch`, as described in [test/README.md](../README.md).
 The capability example is exercised only by legacy Node-service tests, never by the new mandatory SDK.
+
+`controller-6-occupancy-wire.json` and `occupancy-merge-patch.json` are byte-identical to controller-rs
+`test/fixtures/` for controller-rs#51 / cube-app-sdk#66. The former pins keyed allocation, patch and ended
+upserts; the latter is shared with app-common's published `occupancy/merge-patch.json` test fixture.
+Update all copies together. The legacy fixture above is unchanged.

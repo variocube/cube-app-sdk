@@ -21,7 +21,16 @@ import type {
 	StorageItemRemovedMessage,
 	WireBoundary,
 } from "./messages.js";
-import {CODE_SOURCES, eventSchemas, initialStateSchema, LOCK_STATUSES, replySchema, storageSchema} from "./schema.js";
+import {
+	CODE_SOURCES,
+	contentPatchSchema,
+	eventSchemas,
+	idempotencyKeySchema,
+	initialStateSchema,
+	LOCK_STATUSES,
+	replySchema,
+	storageSchema,
+} from "./schema.js";
 import {ControllerSessionImpl, PROTOCOL_MAJOR} from "./session.js";
 import type {
 	CodeReaderConfig,
@@ -139,15 +148,19 @@ export class CubeImpl implements Cube {
 			confirm: (uuid, options) => this.#request({"@type": "confirmOccupancy", uuid, ...options}),
 			cancel: uuid => this.#request({"@type": "cancelOccupancy", uuid}),
 			update: (uuid, options) => this.#request({"@type": "updateOccupancy", uuid, ...options}),
+			patch: (uuid, content, context) => this.#request({"@type": "patchOccupancy", uuid, content, ...context}),
 			changeAccess: (uuid, options) => this.#request({"@type": "changeOccupancyAccess", uuid, ...options}),
 			end: (uuid, options) => this.#request({"@type": "endOccupancy", uuid, ...options}),
 			list: access =>
 				structuredClone(
 					this.#readOccupancies().filter(occupancy =>
-						access === undefined || occupancy.accessCode === access || occupancy.accessKeys.includes(access)
+						occupancy.state !== "ended"
+						&& (access === undefined || occupancy.accessCode === access
+							|| occupancy.accessKeys.includes(access))
 					),
 				),
 			get: uuid => structuredClone(this.#readOccupancies().find(occupancy => occupancy.uuid === uuid)),
+			getByIdempotencyKey: key => structuredClone(this.#readOccupancies().find(o => o.idempotencyKey === key)),
 		};
 		this.storage = {
 			get: <T>(key: string, parse?: (value: unknown) => T) => {
@@ -317,10 +330,11 @@ export class CubeImpl implements Cube {
 		);
 		this.#on<OccupancyEndedMessage>("occupancyEnded", event => {
 			if (!this.#acceptExtension() || !this.#identity) return;
-			// The other three lifecycle events are scoped by `occupancy.appId`, which an end does not
-			// carry. The snapshot is what attributes it; an end that cannot be attributed at all is
-			// still dispatched, rather than swallowing a real one.
-			if (this.#occupancies) {
+			if (event.occupancy) {
+				if (event.occupancy.appId !== this.#identity.appId) return;
+				this.#cacheOccupancy(event.occupancy);
+			}
+			else if (this.#occupancies) {
 				if (!this.#occupancies.some(o => o.uuid === event.uuid)) return;
 				this.#setOccupancies(this.#occupancies.filter(o => o.uuid !== event.uuid));
 			}
@@ -472,14 +486,17 @@ export class CubeImpl implements Cube {
 
 	#upsert(name: "occupancyCreated" | "occupancyUpdated" | "occupancyAccessChanged", event: OccupancyChangedEvent) {
 		if (!this.#acceptExtension() || event.occupancy.appId !== this.#identity?.appId) return;
-		if (this.#occupancies) {
-			const data = [...this.#occupancies];
-			const index = data.findIndex(o => o.uuid === event.occupancy.uuid);
-			if (index === -1) data.push(event.occupancy);
-			else data[index] = event.occupancy;
-			this.#setOccupancies(data);
-		}
+		this.#cacheOccupancy(event.occupancy);
 		this.#dispatchEvent(name, event);
+	}
+
+	#cacheOccupancy(occupancy: Occupancy) {
+		if (!this.#occupancies) return;
+		const data = [...this.#occupancies];
+		const index = data.findIndex(o => o.uuid === occupancy.uuid);
+		if (index === -1) data.push(occupancy);
+		else data[index] = occupancy;
+		this.#setOccupancies(data);
 	}
 
 	#storeItem(value: unknown) {
@@ -566,6 +583,17 @@ export class CubeImpl implements Cube {
 	#request<T = void>(message: VcmpMessage & Record<string, unknown>): Promise<T> {
 		const unready = this.#unready();
 		if (unready) return Promise.reject(unready);
+		if (
+			(message["@type"] === "occupyType" || message["@type"] === "occupyBox")
+			&& message.idempotencyKey !== undefined && !idempotencyKeySchema.safeParse(message.idempotencyKey).success
+		) {
+			return Promise.reject(
+				new CubeError("INVALID_REQUEST", "An idempotency key must be a string of at most 128 characters."),
+			);
+		}
+		if (message["@type"] === "patchOccupancy" && !contentPatchSchema.safeParse(message.content).success) {
+			return Promise.reject(new CubeError("INVALID_REQUEST", "Patch content must be an object."));
+		}
 		if (this.#pending.size >= 64 || new TextEncoder().encode(JSON.stringify(message)).byteLength > 65536) {
 			return Promise.reject(new CubeError("LIMIT_EXCEEDED", "The request exceeds the client request budget."));
 		}
