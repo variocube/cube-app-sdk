@@ -779,6 +779,56 @@ describe("idempotent occupancy contract", () => {
 		).toHaveLength(2);
 	});
 
+	it("keeps the connection ready for a null key, an unkeyed end and a key lookup without a key", async () => {
+		const listener = vi.fn();
+		// The controller serializes an absent optional field as an explicit null, the way accessCode,
+		// actor and action already arrive; an unkeyed record must not cost the whole snapshot.
+		await ready([{...occupancy("one"), idempotencyKey: null} as unknown as Occupancy]);
+		cube.addEventListener("occupancies", listener);
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.occupancies.list().map(o => o.uuid)).toEqual(["one"]);
+		expect(cube.occupancies.get("one")?.idempotencyKey).toBeUndefined();
+		// An unkeyed record answers no key lookup, whatever the caller passes.
+		expect(cube.occupancies.getByIdempotencyKey("")).toBeUndefined();
+		expect(cube.occupancies.getByIdempotencyKey(undefined as unknown as string)).toBeUndefined();
+		// An end decorated with a record this app cannot retain removes it instead of failing.
+		socket.event({"@type": "occupancyEnded", uuid: "one", occupancy: occupancy("one", {state: "ended"})});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.occupancies.get("one")).toBeUndefined();
+		expect(listener).toHaveBeenLastCalledWith({occupancies: []});
+	});
+
+	it("keeps ended records out of the snapshot event and bounds how many it retains", async () => {
+		const events: Array<string[] | undefined> = [];
+		await ready([occupancy("one", {idempotencyKey: "handover:one"})]);
+		cube.addEventListener("occupancies", ({occupancies}) => events.push(occupancies?.map(o => o.uuid)));
+		socket.event({
+			"@type": "occupancyEnded",
+			uuid: "one",
+			occupancy: occupancy("one", {idempotencyKey: "handover:one", state: "ended"}),
+		});
+		await flush();
+		// The event mirrors list(); the retained record stays reachable by UUID and by key.
+		expect(events).toEqual([[]]);
+		expect(cube.occupancies.getByIdempotencyKey("handover:one")?.uuid).toBe("one");
+		for (let index = 0; index < 256; index++) {
+			socket.event({
+				"@type": "occupancyEnded",
+				uuid: `bulk-${index}`,
+				occupancy: occupancy(`bulk-${index}`, {idempotencyKey: `handover:bulk-${index}`, state: "ended"}),
+			});
+		}
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		// 257 ends, a budget of 256: the oldest is dropped rather than retaining every handover for
+		// the life of the connection. The controller still answers for it if the key is reused.
+		expect(cube.occupancies.getByIdempotencyKey("handover:one")).toBeUndefined();
+		expect(cube.occupancies.getByIdempotencyKey("handover:bulk-0")?.uuid).toBe("bulk-0");
+		expect(cube.occupancies.getByIdempotencyKey("handover:bulk-255")?.uuid).toBe("bulk-255");
+		expect(cube.occupancies.list()).toEqual([]);
+	});
+
 	it("validates keys and object patches before sending and keeps the command byte budget", async () => {
 		await ready();
 		await expect(cube.occupancies.occupyCompartment({boxNumber: "1", idempotencyKey: "x".repeat(129)})).rejects

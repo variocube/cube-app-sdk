@@ -292,9 +292,9 @@ export interface Occupancies {
 	end(uuid: string, options?: EndOccupancyOptions): Promise<void>;
 	/** The active occupancies, optionally only those matching an access code or access key. */
 	list(access?: string): Occupancy[];
-	/** The occupancy, or undefined if the snapshot has none with this UUID. */
+	/** The occupancy in any retained state, including ended; undefined if the snapshot has none with this UUID. */
 	get(uuid: string): Occupancy | undefined;
-	/** Any retained state, including ended; undefined means no record when ready. */
+	/** Any retained state, including ended; undefined means no record when ready. An empty key never matches. */
 	getByIdempotencyKey(key: string): Occupancy | undefined;
 }
 
@@ -328,7 +328,11 @@ export interface StorageChangedEvent {
 	key: string;
 }
 
-/** The snapshot changed; undefined when it was cleared because the connection is no longer ready. */
+/**
+ * The snapshot changed; undefined when it was cleared because the connection is no longer ready.
+ * Carries the same active records as `list()`: a retained ended record is reached through `get()`
+ * or `getByIdempotencyKey()`, and its end arrives as `occupancyEnded`.
+ */
 export interface OccupanciesEvent {
 	occupancies: Occupancy[] | undefined;
 }
@@ -341,7 +345,10 @@ export interface OccupancyChangedEvent {
 	occupancy: Occupancy;
 }
 
-/** An occupancy ended/cancelled. Keyed records carry the retained ended snapshot. */
+/**
+ * An occupancy ended/cancelled. Keyed records carry the retained ended snapshot, which stays readable
+ * through `get()` and `getByIdempotencyKey()`; an unkeyed end only removes the UUID.
+ */
 export interface OccupancyEndedEvent {
 	uuid: string;
 	occupancy?: Occupancy;

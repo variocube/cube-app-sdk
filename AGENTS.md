@@ -118,8 +118,9 @@ confirmation upserts via `occupancyCreated`, and cancellation removes pending re
 Preserve full nullable occupancy fields and content. The SDK caches snapshots in memory and surfaces typed ACK
 results/NAKs with correlation. Storage JSON null is distinct from a missing key (`undefined`). Occupancies are scoped
 to the installed app by filtering foreign entries out of a snapshot, never by dropping the snapshot.
-`occupancyEnded` includes a complete ended occupancy for keyed records; unkeyed ends carry only `uuid`.
-Retained ended records remain readable by UUID/key; list() and useOccupancies() are active-only.
+`occupancyEnded` includes a complete ended occupancy for keyed records; unkeyed ends carry only `uuid`, as does
+an end whose payload the SDK cannot retain. Retained ended records remain readable by UUID/key, bounded at 256
+per connection, oldest dropped; list(), useOccupancies() and the `occupancies` event are active-only.
 
 On disconnect/app change clear data/identity and reject pending requests. Discard old generation/key results.
 Controller 6 has no capability discovery. Authentication/initial-state and commands have 10-second deadlines.

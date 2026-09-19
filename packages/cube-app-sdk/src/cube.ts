@@ -64,6 +64,23 @@ const STORAGE_TOTAL_BYTES = 68 * 1048576;
 const STORAGE_CHUNK_BYTES = 48 * 1024;
 
 /**
+ * Ended records stay readable so a keyed allocation survives a restart, but a kiosk stays connected
+ * for weeks and the controller keeps its own seven-day window: past this budget the oldest retained
+ * ends are dropped. The controller remains the authority — reusing the key still returns the record
+ * — so a dropped end costs a reconciling read, never data.
+ */
+const RETAINED_ENDED_OCCUPANCIES = 256;
+
+const isActive = (occupancy: Occupancy) => occupancy.state !== "ended";
+
+function retain(occupancies: Occupancy[]): Occupancy[] {
+	const excess = occupancies.length - occupancies.filter(isActive).length - RETAINED_ENDED_OCCUPANCIES;
+	if (excess <= 0) return occupancies;
+	let dropped = 0;
+	return occupancies.filter(occupancy => isActive(occupancy) || ++dropped > excess);
+}
+
+/**
  * Failures a reconnect cannot resolve, because they need a fresh kiosk launch or new software on
  * one side. Every other failure is transient — a slow snapshot, a malformed frame, a controller
  * domain that dropped away — and is retried, so one bad moment does not strand the app until the
@@ -154,13 +171,20 @@ export class CubeImpl implements Cube {
 			list: access =>
 				structuredClone(
 					this.#readOccupancies().filter(occupancy =>
-						occupancy.state !== "ended"
+						isActive(occupancy)
 						&& (access === undefined || occupancy.accessCode === access
 							|| occupancy.accessKeys.includes(access))
 					),
 				),
 			get: uuid => structuredClone(this.#readOccupancies().find(occupancy => occupancy.uuid === uuid)),
-			getByIdempotencyKey: key => structuredClone(this.#readOccupancies().find(o => o.idempotencyKey === key)),
+			getByIdempotencyKey: key => {
+				// An unkeyed record has no key, so it must never answer a lookup: a caller passing the
+				// key it does not have would otherwise get an unrelated occupancy back. Read first, so
+				// an unready connection still throws instead of reporting absence.
+				const occupancies = this.#readOccupancies();
+				if (typeof key !== "string" || key.length === 0) return undefined;
+				return structuredClone(occupancies.find(occupancy => occupancy.idempotencyKey === key));
+			},
 		};
 		this.storage = {
 			get: <T>(key: string, parse?: (value: unknown) => T) => {
@@ -264,14 +288,15 @@ export class CubeImpl implements Cube {
 			this.#token = token && expiresAt ? {token, expiresAt} : undefined;
 			this.#compartments = event.compartments;
 			this.#devices = event.devices;
-			this.#occupancies = event.occupancies;
 			// A same-generation resnapshot replaces the storage, so reads wait for the next ready barrier.
 			const wasReady = this.connected;
 			this.#connection = {status: "initializing"};
 			if (identityChanged) this.#dispatchEvent("identity", {identity: this.#identity});
 			this.#dispatchEvent("compartments", {compartments: this.#compartments});
 			this.#dispatchEvent("devices", {devices: this.#devices});
-			this.#dispatchEvent("occupancies", {occupancies: this.#occupancies});
+			// `validInitialState` already rejects a snapshot carrying another app's record, so an end for
+			// a foreign occupancy has nothing to strand here.
+			this.#setOccupancies(event.occupancies);
 			if (wasReady) {
 				this.#dispatchEvent("connection", {connection: this.#connection});
 				this.#dispatchEvent("close", {});
@@ -330,10 +355,17 @@ export class CubeImpl implements Cube {
 		);
 		this.#on<OccupancyEndedMessage>("occupancyEnded", event => {
 			if (!this.#acceptExtension() || !this.#identity) return;
-			if (event.occupancy) {
-				if (event.occupancy.appId !== this.#identity.appId) return;
-				this.#cacheOccupancy(event.occupancy);
+			const ended = event.occupancy;
+			if (ended && ended.appId !== this.#identity.appId) return;
+			// Only a keyed record is retained for recovery. An end the controller decorates in a way
+			// this app cannot retain — no key, or a payload that contradicts the end — is treated as a
+			// plain removal instead of failing the connection over data a newer controller added.
+			if (ended && ended.uuid === event.uuid && ended.state === "ended" && ended.idempotencyKey !== undefined) {
+				this.#cacheOccupancy(ended);
 			}
+			// An unkeyed end carries no `appId`, unlike the other three lifecycle events. The snapshot is
+			// what attributes it; an end that cannot be attributed at all is still dispatched, rather
+			// than swallowing a real one.
 			else if (this.#occupancies) {
 				if (!this.#occupancies.some(o => o.uuid === event.uuid)) return;
 				this.#setOccupancies(this.#occupancies.filter(o => o.uuid !== event.uuid));
@@ -480,8 +512,10 @@ export class CubeImpl implements Cube {
 	}
 
 	#setOccupancies(occupancies: Occupancy[] | undefined) {
-		this.#occupancies = occupancies;
-		this.#dispatchEvent("occupancies", {occupancies});
+		this.#occupancies = occupancies && retain(occupancies);
+		// The event carries what `list()` returns. Retained ended records are recovery state, reached
+		// through `get()` and `getByIdempotencyKey()`, and are not part of the live snapshot.
+		this.#dispatchEvent("occupancies", {occupancies: this.#occupancies?.filter(isActive)});
 	}
 
 	#upsert(name: "occupancyCreated" | "occupancyUpdated" | "occupancyAccessChanged", event: OccupancyChangedEvent) {

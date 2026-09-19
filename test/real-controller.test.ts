@@ -1,6 +1,9 @@
 import {bootstrapSession, connect, type ControllerSession, type Cube} from "@variocube/cube-app-sdk";
 import {afterAll, beforeAll, expect, test, vi} from "vitest";
 import {WebSocket} from "ws";
+// The SDK refuses to send a non-object patch, so the shared vectors reach the controller only with
+// that client-side guard stubbed. Imported from source, like the packages' own unit tests.
+import {contentPatchSchema} from "../packages/cube-app-sdk/src/schema.js";
 import {MockDriver, MockKiosk} from "./mock-driver";
 
 // Run an isolated native controller dev --fixture single, then set CONTROLLER_URL.
@@ -149,6 +152,20 @@ test("shared merge-patch vectors against the native controller", async () => {
 				await expect(cube.occupancies.patch(record.uuid, patch)).rejects.toMatchObject({
 					code: "INVALID_REQUEST",
 				});
+				// Then again on the wire: the fixture is shared with controller-rs to pin the
+				// controller's own rejection, which the local guard would otherwise hide.
+				const guard = vi.spyOn(contentPatchSchema, "safeParse").mockReturnValue({
+					success: true,
+					data: patch,
+				});
+				try {
+					await expect(cube.occupancies.patch(record.uuid, patch)).rejects.toMatchObject({
+						code: vector.error,
+					});
+				}
+				finally {
+					guard.mockRestore();
+				}
 			}
 			else {
 				await cube.occupancies.patch(record.uuid, patch);

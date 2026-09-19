@@ -109,12 +109,16 @@ Pass `idempotencyKey` (an opaque string of at most 128 Unicode characters) to `o
 fields differ. Keys are scoped to the installed app. The controller persists keyed ended records and
 retains them for at least seven days after Center acknowledges the end; full history rejects new work.
 
-`occupancies.list()` / `useOccupancies()` return only active records. `get(uuid)` / `useOccupancy(uuid)`
-and `getByIdempotencyKey(key)` / `useOccupancyByIdempotencyKey(key)` also return retained ended records.
-The hooks return `CubeResult`: `ready` with `undefined` means absence; other statuses mean data is unknown.
-All reads clear on disconnect/app generation change and throw before readiness. Keyed `occupancyEnded`
-events contain `{uuid, occupancy}` with `occupancy.state: "ended"`; unkeyed events still remove by UUID.
-Initial snapshots include retained keyed ended records. Controller expiry triggers an authoritative refresh.
+`occupancies.list()` / `useOccupancies()` return only active records, as does the `occupancies` event.
+`get(uuid)` / `useOccupancy(uuid)` and `getByIdempotencyKey(key)` / `useOccupancyByIdempotencyKey(key)` also
+return retained ended records, so an ended occupancy keeps resolving instead of becoming absent; an empty key
+never matches. The hooks return `CubeResult`: `ready` with `undefined` means absence; other statuses mean data
+is unknown. All reads clear on disconnect/app generation change and throw before readiness. Keyed
+`occupancyEnded` events contain `{uuid, occupancy}` with `occupancy.state: "ended"`; unkeyed events still
+remove by UUID, as does an end carrying a record the SDK cannot retain. A connection keeps at most 256 retained
+ended records and drops the oldest past that; the controller stays the authority, so reusing a dropped key
+still returns its record. Initial snapshots include retained keyed ended records. Controller expiry triggers
+an authoritative refresh.
 
 `occupancies.patch(uuid, contentPatch, openContext?)` sends `patchOccupancy` and applies an RFC 7396
 object patch: objects merge recursively, null members delete, and arrays/scalars replace. An empty

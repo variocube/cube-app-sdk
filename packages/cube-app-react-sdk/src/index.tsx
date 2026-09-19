@@ -253,12 +253,16 @@ const subscribeOccupancies: Subscription = (cube, listener) => {
 	return () => unsubscribe.forEach(remove => remove());
 };
 
-/** The controller's live, authoritative occupancies. A ready empty array means there are none. */
+/** The controller's live, authoritative active occupancies. A ready empty array means there are none. */
 export function useOccupancies(): CubeResult<Occupancy[]> {
 	return useCubeSnapshot(readOccupancies, subscribeOccupancies);
 }
 
-/** One occupancy; ready with undefined data means the controller has none with this UUID. */
+/**
+ * One occupancy by UUID, including a retained ended record — unlike `useOccupancies()`, an ended
+ * occupancy keeps resolving here with `state: "ended"`, so absence is not how an end is observed.
+ * Ready with undefined data means the controller has no retained record with this UUID.
+ */
 export function useOccupancy(uuid: string): CubeResult<Occupancy | undefined> {
 	const read = useCallback((cube: Cube) => readResult(cube, () => cube.occupancies.get(uuid)), [uuid]);
 	return useCubeSnapshot(read, subscribeOccupancies);
