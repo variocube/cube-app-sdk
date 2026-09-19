@@ -18,6 +18,8 @@
   "excludes": [
     "**/node_modules",
     "test/fixtures/controller-wire.json",
+    "test/fixtures/controller-6-occupancy-wire.json",
+    "test/fixtures/occupancy-merge-patch.json",
     "**/*-lock.json",
     "**/build",
     "**/dist",
