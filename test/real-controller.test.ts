@@ -129,10 +129,16 @@ test("native keyed allocation, concurrent merge patches and retained ended recon
 	await cube.occupancies.end(first.uuid);
 	await vi.waitFor(() => expect(cube.occupancies.getByIdempotencyKey(key)?.state).toBe("ended"));
 	expect(cube.occupancies.list().some(o => o.uuid === first.uuid)).toBe(false);
+	// The end is enumerable without knowing its key, with the content the patches produced.
+	expect(cube.occupancies.ended().find(o => o.uuid === first.uuid)?.content)
+		.toEqual({ledger: {left: {count: 1}, right: {count: 2}}});
 	cube.close();
 	cube = connect({session});
 	await vi.waitFor(() => expect(cube.connection.status).toBe("ready"), {timeout: 10000});
 	expect(cube.occupancies.getByIdempotencyKey(key)?.uuid).toBe(first.uuid);
+	// The controller pushes the retained record in the fresh snapshot, so ended() sees it after a restart too.
+	expect(cube.occupancies.ended().map(o => o.uuid)).toContain(first.uuid);
+	expect(cube.occupancies.list().map(o => o.uuid)).not.toContain(first.uuid);
 	const ended = await cube.occupancies.occupyType({type: "not-a-type", idempotencyKey: key});
 	expect(ended.uuid).toBe(first.uuid);
 	expect(ended.state).toBe("ended");
