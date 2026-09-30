@@ -799,7 +799,7 @@ describe("idempotent occupancy contract", () => {
 		expect(listener).toHaveBeenLastCalledWith({occupancies: []});
 	});
 
-	it("keeps ended records out of the snapshot event and bounds how many it retains", async () => {
+	it("keeps ended records out of the snapshot event and does not cap how many it retains", async () => {
 		const events: Array<string[] | undefined> = [];
 		await ready([occupancy("one", {idempotencyKey: "handover:one"})]);
 		cube.addEventListener("occupancies", ({occupancies}) => events.push(occupancies?.map(o => o.uuid)));
@@ -812,7 +812,7 @@ describe("idempotent occupancy contract", () => {
 		// The event mirrors list(); the retained record stays reachable by UUID and by key.
 		expect(events).toEqual([[]]);
 		expect(cube.occupancies.getByIdempotencyKey("handover:one")?.uuid).toBe("one");
-		for (let index = 0; index < 256; index++) {
+		for (let index = 0; index < 600; index++) {
 			socket.event({
 				"@type": "occupancyEnded",
 				uuid: `bulk-${index}`,
@@ -821,12 +821,57 @@ describe("idempotent occupancy contract", () => {
 		}
 		await flush();
 		expect(cube.connection.status).toBe("ready");
-		// 257 ends, a budget of 256: the oldest is dropped rather than retaining every handover for
-		// the life of the connection. The controller still answers for it if the key is reused.
-		expect(cube.occupancies.getByIdempotencyKey("handover:one")).toBeUndefined();
+		// The controller bounds its history and a snapshot replaces the set; the SDK never drops the oldest
+		// record (a stock box's deposit) in favour of newer ones, as the controller still retains it.
+		expect(cube.occupancies.getByIdempotencyKey("handover:one")?.uuid).toBe("one");
 		expect(cube.occupancies.getByIdempotencyKey("handover:bulk-0")?.uuid).toBe("bulk-0");
-		expect(cube.occupancies.getByIdempotencyKey("handover:bulk-255")?.uuid).toBe("bulk-255");
+		expect(cube.occupancies.getByIdempotencyKey("handover:bulk-599")?.uuid).toBe("bulk-599");
+		expect(cube.occupancies.ended()).toHaveLength(601);
 		expect(cube.occupancies.list()).toEqual([]);
+	});
+
+	it("lists every retained ended record with ended() and never an active one", async () => {
+		expect(() => cube.occupancies.ended()).toThrow();
+		const snapshotEnded = occupancy("ended-1", {idempotencyKey: "handover:1", state: "ended"});
+		await ready([
+			snapshotEnded,
+			occupancy("active-1", {idempotencyKey: "handover:2"}),
+			occupancy("pending-1", {state: "pending"}),
+		]);
+		// A refreshed snapshot is scoped to the installed app by filtering foreign entries out.
+		socket.event({
+			"@type": "occupancies",
+			occupancies: [
+				snapshotEnded,
+				occupancy("active-1", {idempotencyKey: "handover:2"}),
+				occupancy("pending-1", {state: "pending"}),
+				occupancy("foreign", {appId: "another-app", state: "ended", idempotencyKey: "handover:3"}),
+			],
+		});
+		await flush();
+		expect(cube.occupancies.ended()).toEqual([snapshotEnded]);
+		expect(cube.occupancies.list().map(o => o.uuid).sort()).toEqual(["active-1", "pending-1"]);
+		// A keyed end moves a record from list() to ended(); an unkeyed end removes it from both.
+		socket.event({
+			"@type": "occupancyEnded",
+			uuid: "active-1",
+			occupancy: occupancy("active-1", {idempotencyKey: "handover:2", state: "ended"}),
+		});
+		socket.event({"@type": "occupancyEnded", uuid: "pending-1"});
+		await flush();
+		expect(cube.occupancies.ended().map(o => o.uuid).sort()).toEqual(["active-1", "ended-1"]);
+		expect(cube.occupancies.list()).toEqual([]);
+		// Callers get copies.
+		cube.occupancies.ended()[0].uuid = "tampered";
+		expect(cube.occupancies.ended().map(o => o.uuid)).not.toContain("tampered");
+		// The same records survive a reconnect only as the fresh snapshot states them.
+		socket.close();
+		expect(() => cube.occupancies.ended()).toThrow();
+		await vi.advanceTimersByTimeAsync(10000);
+		socket = Socket.instances.at(-1)!;
+		socket.open();
+		await ready([snapshotEnded]);
+		expect(cube.occupancies.ended()).toEqual([snapshotEnded]);
 	});
 
 	it("validates keys and object patches before sending and keeps the command byte budget", async () => {

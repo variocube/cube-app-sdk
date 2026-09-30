@@ -115,9 +115,11 @@ return retained ended records, so an ended occupancy keeps resolving instead of 
 never matches. The hooks return `CubeResult`: `ready` with `undefined` means absence; other statuses mean data
 is unknown. All reads clear on disconnect/app generation change and throw before readiness. Keyed
 `occupancyEnded` events contain `{uuid, occupancy}` with `occupancy.state: "ended"`; unkeyed events still
-remove by UUID, as does an end carrying a record the SDK cannot retain. A connection keeps at most 256 retained
-ended records and drops the oldest past that; the controller stays the authority, so reusing a dropped key
-still returns its record. Initial snapshots include retained keyed ended records. Controller expiry triggers
+remove by UUID, as does an end carrying a record the SDK cannot retain. `occupancies.ended()` /
+`useEndedOccupancies()` return every retained ended record of the app (the snapshot's plus the keyed ends received
+since; order unspecified), so a consumer can find evidence without knowing a key. The SDK does not cap them: the
+controller bounds its own history and a fresh snapshot replaces the set, whereas a cap would drop records the
+controller still retains. Initial snapshots include retained keyed ended records. Controller expiry triggers
 an authoritative refresh.
 
 `occupancies.patch(uuid, contentPatch, openContext?)` sends `patchOccupancy` and applies an RFC 7396
