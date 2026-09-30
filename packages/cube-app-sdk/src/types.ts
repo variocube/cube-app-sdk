@@ -294,7 +294,8 @@ export interface Occupancies {
 	list(access?: string): Occupancy[];
 	/**
 	 * Every retained ended record of the installed app: what the controller pushed in the snapshot plus the keyed
-	 * ends received since. Unkeyed ends are not retained. Never capped by the SDK, so a record the controller still
+	 * ends received since. An end event without a key is not retained (a snapshot can still contain unkeyed
+	 * ended records, and those are listed). Never capped by the SDK, so a record the controller still
 	 * retains is never missing; order is unspecified. Throws unless ready, like `list()`.
 	 */
 	ended(): Occupancy[];

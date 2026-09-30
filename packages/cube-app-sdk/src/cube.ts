@@ -501,9 +501,11 @@ export class CubeImpl implements Cube {
 		this.#occupancies = occupancies;
 		// The event carries what `list()` returns. Retained ended records are recovery state, reached
 		// through `ended()`, `get()` and `getByIdempotencyKey()`, and are not part of the live snapshot.
-		// They are not capped here: the controller bounds its own history (a full one refuses new work)
-		// and a fresh snapshot replaces the set, whereas dropping by position would discard evidence
-		// the controller still retains.
+		// They are not capped here, because dropping by position would discard evidence the controller
+		// still retains. The bound is the controller's (controller-rs `Domain::expire`): at least seven
+		// days after Center acknowledged the end and until the plan's retirement is applied. Removing a
+		// keyed record bumps its revision, so the next event shows a gap, `#resynchronize()` runs and the
+		// fresh snapshot replaces this set.
 		this.#dispatchEvent("occupancies", {occupancies: this.#occupancies?.filter(isActive)});
 	}
 

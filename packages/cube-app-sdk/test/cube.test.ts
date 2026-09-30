@@ -830,6 +830,21 @@ describe("idempotent occupancy contract", () => {
 		expect(cube.occupancies.list()).toEqual([]);
 	});
 
+	it("keeps the occupancies event and list() active-only after a keyed end while ended() has the record", async () => {
+		const events: Array<string[] | undefined> = [];
+		await ready([occupancy("one", {idempotencyKey: "handover:one"}), occupancy("two")]);
+		cube.addEventListener("occupancies", ({occupancies}) => events.push(occupancies?.map(o => o.uuid)));
+		socket.event({
+			"@type": "occupancyEnded",
+			uuid: "one",
+			occupancy: occupancy("one", {idempotencyKey: "handover:one", state: "ended"}),
+		});
+		await flush();
+		expect(events).toEqual([["two"]]);
+		expect(cube.occupancies.list().map(o => o.uuid)).toEqual(["two"]);
+		expect(cube.occupancies.ended().map(o => o.uuid)).toEqual(["one"]);
+	});
+
 	it("lists every retained ended record with ended() and never an active one", async () => {
 		expect(() => cube.occupancies.ended()).toThrow();
 		const snapshotEnded = occupancy("ended-1", {idempotencyKey: "handover:1", state: "ended"});

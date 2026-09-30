@@ -117,9 +117,12 @@ is unknown. All reads clear on disconnect/app generation change and throw before
 `occupancyEnded` events contain `{uuid, occupancy}` with `occupancy.state: "ended"`; unkeyed events still
 remove by UUID, as does an end carrying a record the SDK cannot retain. `occupancies.ended()` /
 `useEndedOccupancies()` return every retained ended record of the app (the snapshot's plus the keyed ends received
-since; order unspecified), so a consumer can find evidence without knowing a key. The SDK does not cap them: the
-controller bounds its own history and a fresh snapshot replaces the set, whereas a cap would drop records the
-controller still retains. Initial snapshots include retained keyed ended records. Controller expiry triggers
+since; order unspecified), so a consumer can find evidence without knowing a key. The SDK does not cap them, because a cap
+would drop records the controller still retains. The bound is the controller's: it keeps a keyed ended record for at
+least seven days after Center acknowledged the end and until its plan's retirement is applied (full history refuses
+new work), and when it finally removes one it bumps its publication revision and clears its event backlog. The
+SDK's next event then shows a revision gap and it resynchronizes, so a fresh snapshot replaces the set. Between
+removal and that next event, or a reconnect, the SDK may still hold a record the controller has already removed. Initial snapshots include retained keyed ended records. Controller expiry triggers
 an authoritative refresh.
 
 `occupancies.patch(uuid, contentPatch, openContext?)` sends `patchOccupancy` and applies an RFC 7396
