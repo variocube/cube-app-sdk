@@ -258,6 +258,13 @@ export function useOccupancies(): CubeResult<Occupancy[]> {
 	return useCubeSnapshot(readOccupancies, subscribeOccupancies);
 }
 
+const readEnded = (cube: Cube) => readResult(cube, () => cube.occupancies.ended());
+
+/** Every retained ended record, which `useOccupancies()` leaves out. A ready empty array means there are none. */
+export function useEndedOccupancies(): CubeResult<Occupancy[]> {
+	return useCubeSnapshot(readEnded, subscribeOccupancies);
+}
+
 /**
  * One occupancy by UUID, including a retained ended record — unlike `useOccupancies()`, an ended
  * occupancy keeps resolving here with `state: "ended"`, so absence is not how an end is observed.

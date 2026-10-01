@@ -292,6 +292,13 @@ export interface Occupancies {
 	end(uuid: string, options?: EndOccupancyOptions): Promise<void>;
 	/** The active occupancies, optionally only those matching an access code or access key. */
 	list(access?: string): Occupancy[];
+	/**
+	 * Every retained ended record of the installed app: what the controller pushed in the snapshot plus the keyed
+	 * ends received since. An end event without a key is not retained (a snapshot can still contain unkeyed
+	 * ended records, and those are listed). Never capped by the SDK, so a record the controller still
+	 * retains is never missing; order is unspecified. Throws unless ready, like `list()`.
+	 */
+	ended(): Occupancy[];
 	/** The occupancy in any retained state, including ended; undefined if the snapshot has none with this UUID. */
 	get(uuid: string): Occupancy | undefined;
 	/** Any retained state, including ended; undefined means no record when ready. An empty key never matches. */
@@ -330,7 +337,7 @@ export interface StorageChangedEvent {
 
 /**
  * The snapshot changed; undefined when it was cleared because the connection is no longer ready.
- * Carries the same active records as `list()`: a retained ended record is reached through `get()`
+ * Carries the same active records as `list()`: a retained ended record is reached through `ended()`, `get()`
  * or `getByIdempotencyKey()`, and its end arrives as `occupancyEnded`.
  */
 export interface OccupanciesEvent {

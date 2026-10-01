@@ -63,22 +63,7 @@ const STORAGE_ITEM_BYTES = 1048576 + 4096;
 const STORAGE_TOTAL_BYTES = 68 * 1048576;
 const STORAGE_CHUNK_BYTES = 48 * 1024;
 
-/**
- * Ended records stay readable so a keyed allocation survives a restart, but a kiosk stays connected
- * for weeks and the controller keeps its own seven-day window: past this budget the oldest retained
- * ends are dropped. The controller remains the authority — reusing the key still returns the record
- * — so a dropped end costs a reconciling read, never data.
- */
-const RETAINED_ENDED_OCCUPANCIES = 256;
-
 const isActive = (occupancy: Occupancy) => occupancy.state !== "ended";
-
-function retain(occupancies: Occupancy[]): Occupancy[] {
-	const excess = occupancies.length - occupancies.filter(isActive).length - RETAINED_ENDED_OCCUPANCIES;
-	if (excess <= 0) return occupancies;
-	let dropped = 0;
-	return occupancies.filter(occupancy => isActive(occupancy) || ++dropped > excess);
-}
 
 /**
  * Failures a reconnect cannot resolve, because they need a fresh kiosk launch or new software on
@@ -176,6 +161,7 @@ export class CubeImpl implements Cube {
 							|| occupancy.accessKeys.includes(access))
 					),
 				),
+			ended: () => structuredClone(this.#readOccupancies().filter(occupancy => !isActive(occupancy))),
 			get: uuid => structuredClone(this.#readOccupancies().find(occupancy => occupancy.uuid === uuid)),
 			getByIdempotencyKey: key => {
 				// An unkeyed record has no key, so it must never answer a lookup: a caller passing the
@@ -512,9 +498,14 @@ export class CubeImpl implements Cube {
 	}
 
 	#setOccupancies(occupancies: Occupancy[] | undefined) {
-		this.#occupancies = occupancies && retain(occupancies);
+		this.#occupancies = occupancies;
 		// The event carries what `list()` returns. Retained ended records are recovery state, reached
-		// through `get()` and `getByIdempotencyKey()`, and are not part of the live snapshot.
+		// through `ended()`, `get()` and `getByIdempotencyKey()`, and are not part of the live snapshot.
+		// They are not capped here, because dropping by position would discard evidence the controller
+		// still retains. The bound is the controller's (controller-rs `Domain::expire`): at least seven
+		// days after Center acknowledged the end and until the plan's retirement is applied. Removing a
+		// keyed record bumps its revision, so the next event shows a gap, `#resynchronize()` runs and the
+		// fresh snapshot replaces this set.
 		this.#dispatchEvent("occupancies", {occupancies: this.#occupancies?.filter(isActive)});
 	}
 

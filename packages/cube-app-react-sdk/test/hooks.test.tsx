@@ -16,6 +16,7 @@ import {
 	CubeProvider,
 	useConnected,
 	useConnectionState,
+	useEndedOccupancies,
 	useIdentity,
 	useOccupancies,
 	useOccupancy,
@@ -65,6 +66,10 @@ class TestCube {
 		getByIdempotencyKey: (key: string) => {
 			this.assertReady();
 			return this.data.find(o => o.idempotencyKey === key);
+		},
+		ended: () => {
+			this.assertReady();
+			return this.data.filter(o => o.state === "ended");
 		},
 		list: vi.fn(() => {
 			this.assertReady();
@@ -365,7 +370,8 @@ describe("keyed occupancy lookup", () => {
 			const keyed = useOccupancyByIdempotencyKey("handover:deposit");
 			const selected = useOccupancy("one");
 			const active = useOccupancies();
-			return <output>{JSON.stringify({keyed, selected, active})}</output>;
+			const all = useEndedOccupancies();
+			return <output>{JSON.stringify({keyed, selected, active, all})}</output>;
 		}
 		cube.connection = {status: "initializing"};
 		await render(<Probe />);
@@ -377,7 +383,9 @@ describe("keyed occupancy lookup", () => {
 		expect(output().keyed).toEqual({status: "ready", data: ended});
 		expect(output().selected).toEqual({status: "ready", data: ended});
 		expect(output().active).toEqual({status: "ready", data: []});
+		expect(output().all).toEqual({status: "ready", data: [ended]});
 		await act(async () => cube.setConnection({status: "disconnected"}));
+		expect(output().all.status).toBe("disconnected");
 		expect(output().keyed.status).toBe("disconnected");
 		expect(output().keyed.data).toBeUndefined();
 	});
