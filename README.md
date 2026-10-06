@@ -27,7 +27,7 @@ void bootstrapSession({endpoint: "http://localhost:9000"}).then(async session =>
 
 App code calls `connect({session})`; React renders `<CubeProvider session={session}>`. Configure the controller endpoint
 in app code. HTTP is restricted to loopback; remote endpoints require HTTPS. URL parameters cannot select controller
-identity, app ID, audience or terminal. `secondary: true` selects secondary locks on the authenticated cube.
+identity, app ID, audience or terminal.
 
 The first `/app` WebSocket message authenticates protocol major 6. No hardware command or subscription is usable until
 an authoritative initial snapshot arrives. `cube.connection` / `useConnectionState()` expose `disconnected`,
@@ -63,6 +63,15 @@ same authenticated connection. `occupyCompartment` allocates one specific compar
 lets the controller choose one with the same `CompartmentFeature` values as `Compartment.features`. The controller calls
 compartments boxes: `boxNumber` is a `Compartment.number`. Authorization is enforced by the controller.
 
+`openCompartment(number)` sends `openBox`, and the controller opens the compartment's lock on the requesting terminal's
+side of the cube: its `secondaryLock` on a secondary terminal, its `lock` otherwise; it never opens the other side.
+`UNAVAILABLE` means the compartment has no lock on that side, or the lock or the terminal owning it cannot be reached
+right now. It is not necessarily permanent, so do not hide or disable the compartment because of it. `cube.secondary` is
+the side the controller reported when the connection authenticated (`false` before that), and
+`getCompartmentLock(number)` returns the lock `openCompartment` opens. `openLock(lock)` still addresses one specific
+lock. Both take an optional `{actor, action}` context; the controller records it on the opening and on the resulting
+`lock` event, whose `actor` is the app's own attribution when the context names none.
+
 `occupancies.list(access?)` and `occupancies.get(uuid)` are synchronous reads of the latest pushed snapshot; `get`
 returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown
 snapshot is never mistaken for an empty one. A local read can trail a just-acknowledged mutation until its publication
@@ -86,6 +95,15 @@ barrier. No read method sends a `get*` request.
 result: `await cube.getToken()` immediately before each backend request is the only way to obtain it. It reads the
 current pushed JWT and rejects a wrong or expired audience without exposing a Center token. The controller pushes token
 rotations; they are not identity changes.
+
+## Upgrading from SDK 1
+
+- Bootstrap a session before application startup and pass it to `connect({session})` / `<CubeProvider session>`.
+- The terminal's side of the cube comes from the controller, which derives it from the kiosk launch. The `secondary`
+  connect option, the `CubeProvider` prop and SDK 1's `?secondary=` URL parsing are gone; `cube.secondary` is read-only
+  and reports the side the controller sent when the connection authenticated. `openCompartment` opens that side's lock
+  and rejects a compartment without one with `UNAVAILABLE` instead of the former local `NOT_FOUND`. `UNAVAILABLE` also
+  covers a lock or owning terminal that is unreachable for now, so it is no reason to hide or disable the compartment.
 
 ## Native development and checks
 

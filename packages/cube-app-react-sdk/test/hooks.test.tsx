@@ -8,9 +8,9 @@ import {
 	CubeIdentity,
 	Occupancy,
 } from "@variocube/cube-app-sdk";
-import React, {act} from "react";
+import React, {act, type ComponentProps} from "react";
 import {createRoot, Root} from "react-dom/client";
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, describe, expect, expectTypeOf, it, vi} from "vitest";
 import {
 	bootstrapSession,
 	CubeProvider,
@@ -361,6 +361,12 @@ describe("occupancy, identity and connection hooks", () => {
 
 	it("re-exports the session bootstrap so React apps need no second package", () => {
 		expect(bootstrapSession).toBeTypeOf("function");
+	});
+});
+
+describe("terminal side", () => {
+	it("leaves the side to the controller: CubeProvider takes no secondary prop", () => {
+		expectTypeOf<ComponentProps<typeof CubeProvider>>().not.toHaveProperty("secondary");
 	});
 });
 

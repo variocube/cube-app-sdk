@@ -34,12 +34,13 @@ export interface LockEvent {
 	status: LockStatus;
 
 	/**
-	 * The actor that was passed in the open command leading to this lock event.
+	 * The actor of the open command leading to this lock event: the `OpenContext.actor` the app passed, or the
+	 * controller's own attribution (such as `app:<id>@<terminal>`) when it passed none.
 	 */
 	actor?: string;
 
 	/**
-	 * The action that was passed in the open command leading to this lock event.
+	 * The action that was passed in the open command leading to this lock event (`OpenContext.action`).
 	 */
 	action?: string;
 }
@@ -166,10 +167,17 @@ export interface Device {
 
 /** The context of opening a lock/compartment. */
 export interface OpenContext {
-	/** The actor who is opening the lock/compartment. */
+	/**
+	 * The actor who is opening the lock/compartment, such as a customer or courier reference. The controller records
+	 * it on the opening and on the resulting lock event (`LockEvent.actor`) instead of the app's own attribution. An
+	 * actor longer than 128 bytes is ignored.
+	 */
 	actor?: string;
 
-	/** The action associated with opening the lock/compartment. */
+	/**
+	 * The action associated with opening the lock/compartment, recorded on the resulting lock event
+	 * (`LockEvent.action`). An action longer than 128 bytes is ignored.
+	 */
 	action?: string;
 }
 
@@ -418,11 +426,16 @@ export interface Cube {
 	openLock(lock: string, context?: OpenContext): Promise<void>;
 
 	/**
-	 * Opens the lock of the compartment with the specified compartment number.
+	 * Opens the lock of the compartment with the specified compartment number on this terminal's side of the cube.
+	 * The controller resolves the lock: the compartment's `secondaryLock` on a secondary terminal, its `lock`
+	 * otherwise (see `secondary`). It never falls back to the other side's lock.
 	 * @param compartmentNumber The compartment number
 	 * @param context The context of the open command
 	 * @return A promise that resolves when the open command was successfully handled by the locking hardware.
-	 * @throws CubeError if the compartment cannot be found, it does not have a lock configured, or the open command could not be passed to the locking hardware.
+	 * @throws CubeError `NOT_FOUND` if the compartment cannot be found; `UNAVAILABLE` if it has no lock on this
+	 * terminal's side, or that lock or the terminal owning it cannot be reached right now, so it is not necessarily
+	 * permanent and no reason to hide or disable the compartment; or another code if the open command could not be
+	 * passed to the locking hardware.
 	 */
 	openCompartment(compartmentNumber: string, context?: OpenContext): Promise<void>;
 
@@ -439,7 +452,8 @@ export interface Cube {
 	getCompartment(compartmentNumber: string): Compartment | undefined;
 
 	/**
-	 * Returns the lock of the specified compartment; the secondary lock if the app runs on the secondary side.
+	 * Returns the lock of the specified compartment on this terminal's side, the one `openCompartment` opens: the
+	 * secondary lock if `secondary` is true, the primary lock otherwise.
 	 * @param compartmentNumber The compartment number
 	 * @return The lock, or undefined if the compartment was not found or has no such lock.
 	 */
@@ -451,9 +465,12 @@ export interface Cube {
 	devices: Device[];
 
 	/**
-	 * Whether the app runs on the secondary side of the cube.
+	 * Whether this terminal serves the secondary side of the cube, as the controller reports it when the connection
+	 * authenticates. It is `false` until the first authentication; afterwards it holds the latest authentication's
+	 * value, also while reconnecting. This SDK requires a controller with `openBox` support; an earlier controller 6
+	 * prerelease does not report the side, and its terminals count as primary.
 	 */
-	secondary: boolean;
+	readonly secondary: boolean;
 
 	/**
 	 * Whether the connection is ready; shorthand for `connection.status === "ready"`.

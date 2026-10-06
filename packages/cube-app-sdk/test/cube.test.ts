@@ -1,11 +1,12 @@
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, describe, expect, expectTypeOf, it, vi} from "vitest";
 import occupancyWire from "../../../test/fixtures/controller-6-occupancy-wire.json";
 import fixture from "../../../test/fixtures/controller-wire.json";
+import type {ConnectOptions} from "../src/connect.js";
 import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
 import type {CubeMessageIdentity, StorageItem} from "../src/messages.js";
 import {ControllerSessionImpl as ControllerSession} from "../src/session.js";
-import type {Occupancy} from "../src/types.js";
+import type {Occupancy, OpenContext} from "../src/types.js";
 
 class Socket {
 	static instances: Socket[] = [];
@@ -91,13 +92,14 @@ async function flush() {
 let cube: CubeImpl;
 let socket: Socket;
 
-async function authenticate(protocolMajor = 6) {
+/** `side` is merged into the reply; leave it out to model a controller that does not report the side. */
+async function authenticate(protocolMajor = 6, side: { secondary?: unknown } = {}) {
 	await flush();
 	const frame = socket.frames.find(frame =>
 		frame.startsWith("MSG") && JSON.parse(frame.slice(15))["@type"] === "authenticate"
 	);
 	if (!frame) throw new Error("Missing authentication frame");
-	socket.onmessage?.({data: `ACK${frame.slice(3, 15)}${JSON.stringify({protocolMajor, generation: 1})}`});
+	socket.onmessage?.({data: `ACK${frame.slice(3, 15)}${JSON.stringify({protocolMajor, generation: 1, ...side})}`});
 	await flush();
 }
 
@@ -370,7 +372,6 @@ describe("commands and authentication", () => {
 		expect(cube.getCompartmentLock("1")).toBe("lock-1");
 		expect(cube.getCompartmentLock("2")).toBeUndefined();
 		expect(cube.getCompartmentLock("missing")).toBeUndefined();
-		await expect(cube.openCompartment("2")).rejects.toMatchObject({code: "NOT_FOUND"});
 		await expect(cube.openCompartment("missing")).rejects.toMatchObject({code: "NOT_FOUND"});
 		await expect(cube.configureCodeReader({indicators: {beeper: {volume: 101}}})).rejects.toMatchObject({
 			code: "INVALID_REQUEST",
@@ -689,6 +690,134 @@ describe("commands and authentication", () => {
 		await failure;
 		expect(cube.identity).toBeUndefined();
 		expect(cube.connection).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
+	});
+});
+
+describe("terminal side and openBox", () => {
+	const boxes = [
+		{number: "1", enabled: true, types: [], features: [], lock: "lock-1", secondaryLock: "secondary-1"},
+		{number: "2", enabled: true, types: [], features: [], lock: "lock-2"},
+	];
+
+	async function readyOnSide(side: { secondary?: unknown }) {
+		await authenticate(6, side);
+		initial();
+		socket.event({"@type": "ready"});
+		socket.event({"@type": "compartments", compartments: boxes});
+		await flush();
+	}
+
+	it("sends openBox with the number and open context and leaves the lock to the controller", async () => {
+		// Before readiness the connection's own reason applies, not a missing compartment.
+		await expect(cube.openCompartment("1")).rejects.toMatchObject({code: "NOT_READY"});
+		await readyOnSide({secondary: false});
+		const opened = cube.openCompartment("2", {actor: "customer", action: "collect"});
+		expect(socket.requests().map(frame => JSON.parse(frame.slice(15)))).toEqual([
+			{"@type": "openBox", number: "2", actor: "customer", action: "collect"},
+		]);
+		socket.reply(socket.request("openBox"));
+		await expect(opened).resolves.toBeUndefined();
+		// The controller records the app's attribution on the resulting observed lock event.
+		const locks = vi.fn();
+		cube.addEventListener("lock", locks);
+		socket.event({
+			"@type": "lock",
+			lock: "lock-2",
+			compartmentNumber: "2",
+			status: "OPEN",
+			actor: "customer",
+			action: "collect",
+		});
+		await flush();
+		expect(locks).toHaveBeenCalledWith(expect.objectContaining({
+			lock: "lock-2",
+			compartmentNumber: "2",
+			status: "OPEN",
+			actor: "customer",
+			action: "collect",
+		}));
+		const bare = cube.openCompartment("1");
+		expect(JSON.parse(socket.request("openBox").slice(15))).toEqual({"@type": "openBox", number: "1"});
+		socket.reply(socket.request("openBox"));
+		await bare;
+		await expect(cube.openCompartment("missing")).rejects.toMatchObject({code: "NOT_FOUND"});
+		expect(socket.requests()).toHaveLength(2);
+	});
+
+	// A context passed as a variable can be wider than `OpenContext`; it never redirects the command.
+	const widened = {"@type": "openLock", number: "1", lock: "lock-1", actor: "customer", action: "collect"};
+
+	it("never lets a widened context override openCompartment's number or command type", async () => {
+		await readyOnSide({secondary: false});
+		const opened = cube.openCompartment("2", widened as OpenContext);
+		expect(socket.requests().map(frame => JSON.parse(frame.slice(15)))).toEqual([
+			{"@type": "openBox", number: "2", lock: "lock-1", actor: "customer", action: "collect"},
+		]);
+		socket.reply(socket.request("openBox"));
+		await opened;
+	});
+
+	it("never lets a widened context override openLock's lock or command type", async () => {
+		await readyOnSide({secondary: false});
+		const opened = cube.openLock("lock-2", {...widened, "@type": "openBox"} as OpenContext);
+		expect(socket.requests().map(frame => JSON.parse(frame.slice(15)))).toEqual([
+			{"@type": "openLock", number: "1", lock: "lock-2", actor: "customer", action: "collect"},
+		]);
+		socket.reply(socket.request("openLock"));
+		await opened;
+	});
+
+	it("surfaces the controller's UNAVAILABLE for a compartment without a lock on this side", async () => {
+		await readyOnSide({secondary: true});
+		expect(cube.getCompartmentLock("2")).toBeUndefined();
+		const opened = cube.openCompartment("2");
+		const failure = expect(opened).rejects.toMatchObject({code: "UNAVAILABLE", message: "No lock on this side"});
+		socket.reply(socket.request("openBox"), {
+			status: 503,
+			title: "No lock on this side",
+			detail: "No lock on this side",
+			code: "UNAVAILABLE",
+		}, "NAK");
+		await failure;
+		await expect(opened).rejects.toBeInstanceOf(CubeError);
+		expect(cube.connection.status).toBe("ready");
+		expect(socket.requests()).toHaveLength(1);
+	});
+
+	it.each([
+		{side: {secondary: true}, secondary: true, lock: "secondary-1"},
+		{side: {secondary: false}, secondary: false, lock: "lock-1"},
+		{side: {}, secondary: false, lock: "lock-1"},
+	])("takes the side from the authenticate reply: $side", async ({side, secondary, lock}) => {
+		expect(cube.secondary).toBe(false);
+		await readyOnSide(side);
+		expect(cube.secondary).toBe(secondary);
+		expect(cube.getCompartmentLock("1")).toBe(lock);
+	});
+
+	it("follows a re-authentication that changes the side and keeps the last one while reconnecting", async () => {
+		await readyOnSide({secondary: true});
+		expect(cube.getCompartmentLock("1")).toBe("secondary-1");
+		socket.close();
+		await flush();
+		expect(cube.connection.status).toBe("disconnected");
+		expect(cube.secondary).toBe(true);
+		await vi.advanceTimersByTimeAsync(10000);
+		socket = Socket.instances.at(-1)!;
+		socket.open();
+		await readyOnSide({secondary: false});
+		expect(cube.secondary).toBe(false);
+		expect(cube.getCompartmentLock("1")).toBe("lock-1");
+	});
+
+	it("rejects a side that is not a boolean", async () => {
+		await authenticate(6, {secondary: "true"});
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "INVALID_RESPONSE"}});
+		expect(cube.secondary).toBe(false);
+	});
+
+	it("leaves the side to the controller: connect takes no secondary option", () => {
+		expectTypeOf<ConnectOptions>().not.toHaveProperty("secondary");
 	});
 });
 

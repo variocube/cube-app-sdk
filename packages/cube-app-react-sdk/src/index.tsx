@@ -50,7 +50,7 @@ const CubeContext = createContext<CubeContextContent>({
 export function CubeProvider(props: PropsWithChildren<ConnectOptions>) {
 	// A changed session owns a new connection and subtree. Never render the old cube's
 	// identity or business data while the replacement connection is being established.
-	return <CubeConnection key={`${sessionKey(props.session)}:${props.secondary}`} {...props} />;
+	return <CubeConnection key={sessionKey(props.session)} {...props} />;
 }
 
 const sessionKeys = new WeakMap<ControllerSession, number>();
@@ -65,7 +65,6 @@ function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 	const {
 		children,
 		session,
-		secondary,
 	} = props;
 
 	const [cube, setCube] = useState<Cube>();
@@ -75,7 +74,7 @@ function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 	const [locks, setLocks] = useState<Record<string, LockStatus>>({});
 
 	useEffect(() => {
-		const cube = connect({session, secondary});
+		const cube = connect({session});
 		const unsubscribe = [
 			cube.addEventListener("open", () => setConnected(true)),
 			cube.addEventListener("close", () => setConnected(false)),
@@ -93,7 +92,7 @@ function CubeConnection(props: PropsWithChildren<ConnectOptions>) {
 			unsubscribe.forEach(remove => remove());
 			cube.close();
 		};
-	}, [session, secondary]);
+	}, [session]);
 
 	const value = useMemo(() => ({
 		cube,
