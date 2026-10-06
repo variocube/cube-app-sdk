@@ -470,7 +470,7 @@ export interface Cube {
 	 * value, also while reconnecting. This SDK requires a controller with `openBox` support; an earlier controller 6
 	 * prerelease does not report the side, and its terminals count as primary.
 	 */
-	secondary: boolean;
+	readonly secondary: boolean;
 
 	/**
 	 * Whether the connection is ready; shorthand for `connection.status === "ready"`.
