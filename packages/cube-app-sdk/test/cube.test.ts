@@ -6,7 +6,7 @@ import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
 import type {CubeMessageIdentity, StorageItem} from "../src/messages.js";
 import {ControllerSessionImpl as ControllerSession} from "../src/session.js";
-import type {Occupancy} from "../src/types.js";
+import type {Occupancy, OpenContext} from "../src/types.js";
 
 class Socket {
 	static instances: Socket[] = [];
@@ -742,6 +742,29 @@ describe("terminal side and openBox", () => {
 		await bare;
 		await expect(cube.openCompartment("missing")).rejects.toMatchObject({code: "NOT_FOUND"});
 		expect(socket.requests()).toHaveLength(2);
+	});
+
+	// A context passed as a variable can be wider than `OpenContext`; it never redirects the command.
+	const widened = {"@type": "openLock", number: "1", lock: "lock-1", actor: "customer", action: "collect"};
+
+	it("never lets a widened context override openCompartment's number or command type", async () => {
+		await readyOnSide({secondary: false});
+		const opened = cube.openCompartment("2", widened as OpenContext);
+		expect(socket.requests().map(frame => JSON.parse(frame.slice(15)))).toEqual([
+			{"@type": "openBox", number: "2", lock: "lock-1", actor: "customer", action: "collect"},
+		]);
+		socket.reply(socket.request("openBox"));
+		await opened;
+	});
+
+	it("never lets a widened context override openLock's lock or command type", async () => {
+		await readyOnSide({secondary: false});
+		const opened = cube.openLock("lock-2", {...widened, "@type": "openBox"} as OpenContext);
+		expect(socket.requests().map(frame => JSON.parse(frame.slice(15)))).toEqual([
+			{"@type": "openLock", number: "1", lock: "lock-2", actor: "customer", action: "collect"},
+		]);
+		socket.reply(socket.request("openLock"));
+		await opened;
 	});
 
 	it("surfaces the controller's UNAVAILABLE for a compartment without a lock on this side", async () => {

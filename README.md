@@ -64,12 +64,13 @@ lets the controller choose one with the same `CompartmentFeature` values as `Com
 compartments boxes: `boxNumber` is a `Compartment.number`. Authorization is enforced by the controller.
 
 `openCompartment(number)` sends `openBox`, and the controller opens the compartment's lock on the requesting terminal's
-side of the cube: its `secondaryLock` on a secondary terminal, its `lock` otherwise. A compartment without a lock on
-that side rejects with `UNAVAILABLE`; it never opens the other side. `cube.secondary` is the side the controller
-reported when the connection authenticated (`false` before that), and `getCompartmentLock(number)` returns the lock
-`openCompartment` opens. `openLock(lock)` still addresses one specific lock. Both take an optional `{actor, action}`
-context; the controller records it on the opening and on the resulting `lock` event, whose `actor` is the app's own
-attribution when the context names none.
+side of the cube: its `secondaryLock` on a secondary terminal, its `lock` otherwise; it never opens the other side.
+`UNAVAILABLE` means the compartment has no lock on that side, or the lock or the terminal owning it cannot be reached
+right now. It is not necessarily permanent, so do not hide or disable the compartment because of it. `cube.secondary` is
+the side the controller reported when the connection authenticated (`false` before that), and
+`getCompartmentLock(number)` returns the lock `openCompartment` opens. `openLock(lock)` still addresses one specific
+lock. Both take an optional `{actor, action}` context; the controller records it on the opening and on the resulting
+`lock` event, whose `actor` is the app's own attribution when the context names none.
 
 `occupancies.list(access?)` and `occupancies.get(uuid)` are synchronous reads of the latest pushed snapshot; `get`
 returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown
@@ -101,7 +102,8 @@ rotations; they are not identity changes.
 - The terminal's side of the cube comes from the controller. Remove the `secondary` connect option and
   `CubeProvider` prop; they are deprecated and ignored. Do not forward the kiosk's `secondary=true` URL parameter: the
   controller derives the side from the kiosk launch. `openCompartment` opens that side's lock and rejects a
-  compartment without one with `UNAVAILABLE` instead of the former local `NOT_FOUND`.
+  compartment without one with `UNAVAILABLE` instead of the former local `NOT_FOUND`. `UNAVAILABLE` also covers a lock
+  or owning terminal that is unreachable for now, so it is no reason to hide or disable the compartment.
 
 ## Native development and checks
 

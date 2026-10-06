@@ -744,15 +744,19 @@ export class CubeImpl implements Cube {
 	}
 
 	openLock(lock: string, context?: OpenContext): Promise<void> {
-		return this.#request({"@type": "openLock", lock, ...context});
+		// The context goes first, so a widened object carrying `lock` or `@type` cannot redirect the command.
+		return this.#request({...context, "@type": "openLock", lock});
 	}
 
-	/** The controller picks the lock on this terminal's side and rejects a box without one with `UNAVAILABLE`. */
+	/**
+	 * The controller picks the lock on this terminal's side. `UNAVAILABLE` means the box has no lock on that side, or
+	 * the lock or its owning terminal is unreachable right now.
+	 */
 	openCompartment(compartmentNumber: string, context?: OpenContext): Promise<void> {
 		if (this.connected && !this.getCompartment(compartmentNumber)) {
 			return Promise.reject(new CubeError("NOT_FOUND", `Compartment ${compartmentNumber} not found`));
 		}
-		return this.#request({"@type": "openBox", number: compartmentNumber, ...context});
+		return this.#request({...context, "@type": "openBox", number: compartmentNumber});
 	}
 
 	getCompartmentLock(compartmentNumber: string) {

@@ -432,8 +432,10 @@ export interface Cube {
 	 * @param compartmentNumber The compartment number
 	 * @param context The context of the open command
 	 * @return A promise that resolves when the open command was successfully handled by the locking hardware.
-	 * @throws CubeError `NOT_FOUND` if the compartment cannot be found, `UNAVAILABLE` if it has no lock on this
-	 * terminal's side, or another code if the open command could not be passed to the locking hardware.
+	 * @throws CubeError `NOT_FOUND` if the compartment cannot be found; `UNAVAILABLE` if it has no lock on this
+	 * terminal's side, or that lock or the terminal owning it cannot be reached right now, so it is not necessarily
+	 * permanent and no reason to hide or disable the compartment; or another code if the open command could not be
+	 * passed to the locking hardware.
 	 */
 	openCompartment(compartmentNumber: string, context?: OpenContext): Promise<void>;
 

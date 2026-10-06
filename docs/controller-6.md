@@ -51,8 +51,9 @@ network requests. Local reads can trail a just-acknowledged mutation until its p
 for the expected UUID/state when reconciling. No mutation is replayed automatically.
 
 `openCompartment(number, context?)` sends `{ "@type":"openBox", "number":"1", "actor"?, "action"? }`. The controller
-resolves the box's lock on the requesting terminal's side and rejects a box without one with `UNAVAILABLE`, never
-falling back to the other side. The SDK checks only that the compartment exists in its snapshot (`NOT_FOUND`).
+resolves the box's lock on the requesting terminal's side, never falling back to the other side. `UNAVAILABLE` means
+the box has no lock on that side, or the lock or its owning terminal is not reachable right now; it is not necessarily
+permanent. The SDK checks only that the compartment exists in its snapshot (`NOT_FOUND`).
 `openLock(lock, context?)` sends `openLock` for a specific lock and is unchanged. Both carry the `OpenContext`
 attribution: the controller records the app's `actor` (at most 128 bytes) instead of its derived
 `app:<id>@<terminal>`, and `action`, on the opening and on the resulting `lock` event.
