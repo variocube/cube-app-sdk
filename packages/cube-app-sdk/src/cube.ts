@@ -89,7 +89,6 @@ interface PendingRequest {
 
 export interface CubeImplOptions {
 	session: ControllerSessionImpl;
-	secondary?: boolean;
 }
 
 export class CubeImpl implements Cube {
@@ -110,6 +109,7 @@ export class CubeImpl implements Cube {
 		occupancyEnded: [],
 	};
 	readonly #client: VcmpClient;
+	/** The terminal's side from the latest authentication: primary before the first, kept while reconnecting. */
 	#secondary = false;
 	readonly #unsubscribeSession: () => void;
 	#initialReceived = false;
@@ -140,7 +140,6 @@ export class CubeImpl implements Cube {
 	readonly storage: CubeStorage;
 
 	constructor(options: CubeImplOptions) {
-		this.#secondary = options.secondary ?? false;
 		this.occupancies = {
 			occupyType: ({features, ...request}) => {
 				const flags = Object.fromEntries((features ?? []).map(feature => [FEATURE_FLAGS[feature], true]));
@@ -219,6 +218,11 @@ export class CubeImpl implements Cube {
 						"The installed app generation changed; a fresh kiosk launch is required.",
 					);
 				}
+				if (reply.secondary !== undefined && typeof reply.secondary !== "boolean") {
+					throw new CubeError("INVALID_RESPONSE", "Invalid terminal side.");
+				}
+				// A controller 6 prerelease without `openBox` does not report the side; it knows only the primary one.
+				this.#secondary = reply.secondary ?? false;
 				this.#wireGeneration = reply.generation;
 				this.#authenticated = true;
 				this.#authenticationPending = false;
@@ -743,13 +747,12 @@ export class CubeImpl implements Cube {
 		return this.#request({"@type": "openLock", lock, ...context});
 	}
 
-	async openCompartment(compartmentNumber: string, context?: OpenContext) {
-		if (!this.getCompartment(compartmentNumber)) {
-			throw new CubeError("NOT_FOUND", `Compartment ${compartmentNumber} not found`);
+	/** The controller picks the lock on this terminal's side and rejects a box without one with `UNAVAILABLE`. */
+	openCompartment(compartmentNumber: string, context?: OpenContext): Promise<void> {
+		if (this.connected && !this.getCompartment(compartmentNumber)) {
+			return Promise.reject(new CubeError("NOT_FOUND", `Compartment ${compartmentNumber} not found`));
 		}
-		const lock = this.getCompartmentLock(compartmentNumber);
-		if (!lock) throw new CubeError("NOT_FOUND", `Compartment ${compartmentNumber} has no lock`);
-		await this.openLock(lock, context);
+		return this.#request({"@type": "openBox", number: compartmentNumber, ...context});
 	}
 
 	getCompartmentLock(compartmentNumber: string) {

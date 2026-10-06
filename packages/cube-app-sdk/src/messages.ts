@@ -26,6 +26,14 @@ export interface OpenLockMessage extends VcmpMessage {
 	action?: string;
 }
 
+/** Opens the box's lock on the requesting terminal's side; the controller resolves which lock that is. */
+export interface OpenBoxMessage extends VcmpMessage {
+	"@type": "openBox";
+	number: string;
+	actor?: string;
+	action?: string;
+}
+
 export interface LockMessage extends VcmpMessage, LockEvent {
 	"@type": "lock";
 }
@@ -72,7 +80,7 @@ export interface WireBoundary {
 	revision: number;
 }
 
-/** The first request on `/app`; its reply is `{protocolMajor, generation}`. */
+/** The first request on `/app`; its reply is `{protocolMajor, generation, secondary}`. */
 export interface AuthenticateMessage extends VcmpMessage {
 	"@type": "authenticate";
 	protocolMajor: number;

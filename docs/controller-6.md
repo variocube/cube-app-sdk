@@ -21,8 +21,12 @@ and rejects redirects. A grant is delivered as `#vc-bootstrap=<percent-encoded J
 its original leading `#` or is empty. Cleanup happens synchronously, including malformed envelopes.
 
 WebSocket `/app` uses VCMP. First request: `{ "@type":"authenticate", "protocolMajor":6, "credential":"..." }`.
-Its ACK is `{protocolMajor:6,generation}`. Until the ACK validates, the SDK buffers at most one initial snapshot plus
-64 events within 256 KiB; rejected/disconnected authentication discards that buffer without publishing protected data. The initial event is:
+Its ACK is `{protocolMajor:6,generation,secondary}`. `secondary` is the authenticated terminal's side of the cube
+([controller-rs #34](https://github.com/variocube/controller-rs/issues/34)); the SDK takes it from every
+authentication and treats an absent field, from an earlier controller 6 prerelease, as primary.
+
+Until the ACK validates, the SDK buffers at most one initial snapshot plus 64 events within 256 KiB;
+rejected/disconnected authentication discards that buffer without publishing protected data. The initial event is:
 
 ```json
 {
@@ -45,6 +49,11 @@ The SDK sends authentication and mutations only. `getOccupancy`, `getOccupancies
 and `getToken` are removed from the wire. The public read methods are synchronous and read the latest complete pushed cache without
 network requests. Local reads can trail a just-acknowledged mutation until its publication arrives; use events or wait
 for the expected UUID/state when reconciling. No mutation is replayed automatically.
+
+`openCompartment(number, context?)` sends `{ "@type":"openBox", "number":"1", "actor"?, "action"? }`. The controller
+resolves the box's lock on the requesting terminal's side and rejects a box without one with `UNAVAILABLE`, never
+falling back to the other side. The SDK checks only that the compartment exists in its snapshot (`NOT_FOUND`).
+`openLock(lock, context?)` sends `openLock` for a specific lock and is unchanged.
 
 Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
 publication uses the contiguous per-session revision, including storage chunks and the ready barrier:
