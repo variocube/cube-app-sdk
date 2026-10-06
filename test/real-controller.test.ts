@@ -1,4 +1,4 @@
-import {bootstrapSession, connect, type ControllerSession, type Cube} from "@variocube/cube-app-sdk";
+import {bootstrapSession, connect, type ControllerSession, type Cube, type LockEvent} from "@variocube/cube-app-sdk";
 import {afterAll, beforeAll, expect, test, vi} from "vitest";
 import {WebSocket} from "ws";
 // The SDK refuses to send a non-object patch, so the shared vectors reach the controller only with
@@ -199,9 +199,8 @@ test("shared merge-patch vectors against the native controller", async () => {
 	}
 });
 
-// Which lock the controller dispatched is not visible to an app: a lock event only reports a status change, and a
-// lock that an earlier run or terminal already opened does not change. So these tests pin the side through the
-// controller's acceptance: a compartment opens only with a lock on the terminal's own side, never the other one.
+// A compartment opens only with a lock on the terminal's own side, never the other one. Which lock opened, and for
+// whom, shows in the observed lock event; see `expectOpen` for when there is one.
 test("openCompartment on a primary terminal opens compartments with a primary lock", async () => {
 	expect(cube.secondary).toBe(false);
 	const boxes = freeCompartments();
@@ -237,9 +236,33 @@ test("openCompartment on a secondary terminal opens only secondary locks", async
 	}
 });
 
-/** A compartment with a lock on this side opens; one without is UNAVAILABLE rather than opening the other side. */
+/**
+ * A compartment with a lock on this side opens, and its lock event names that lock and the app's attribution. One
+ * without is UNAVAILABLE rather than opening the other side.
+ */
 async function expectOpen(number: string, lock: string | undefined) {
-	const opened = cube.openCompartment(number, {actor: "sdk-native", action: "open"});
-	if (lock) await opened;
-	else await expect(opened).rejects.toMatchObject({code: "UNAVAILABLE"});
+	const context = {actor: `sdk-native:${crypto.randomUUID()}`, action: "collect"};
+	const events: LockEvent[] = [];
+	const remove = cube.addEventListener("lock", event => events.push(event));
+	try {
+		const opened = cube.openCompartment(number, context);
+		if (!lock) {
+			await expect(opened).rejects.toMatchObject({code: "UNAVAILABLE"});
+			return;
+		}
+		// The ACK passes the controller's dispatch outcome through. A lock event reports only an observed status
+		// change, and a lock an earlier run or another terminal of this cube opened stays open in the simulator, so
+		// ALREADY_OPEN has no event to check. Any other outcome must produce one.
+		const result = await opened as unknown as { outcome?: string } | undefined;
+		if (result?.outcome === "ALREADY_OPEN") return;
+		await vi.waitFor(
+			() => expect(events).toContainEqual(expect.objectContaining({lock, status: "OPEN", ...context})),
+			{timeout: 10000},
+		);
+		// Only this lock opened, never the other side's.
+		expect(events.filter(event => event.status === "OPEN").map(event => event.lock)).toEqual([lock]);
+	}
+	finally {
+		remove();
+	}
 }
