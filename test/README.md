@@ -34,12 +34,20 @@ requests without executing physical actions. Use an isolated fixture instance: t
 `openCompartment` is exercised on both sides of the terminal. The primary launch opens every free compartment with a
 `lock`. The last test launches the same app URL with `secondary=true`, as a kiosk with `SECONDARY=true` does, which ends
 the primary session; the controller then reports `secondary: true`, compartments with a `secondaryLock` open, and the
-others reject with `UNAVAILABLE` instead of opening their primary lock. Each opening passes an `{actor, action}`
-context, and the observed lock event must name the expected lock with exactly that attribution. A lock that an earlier
-run or another terminal of the cube already opened has no status change and no event; the controller's `ALREADY_OPEN`
-outcome skips that check. It relaunches the primary URL at the end. The bundled `single` fixture has no secondary locks,
-so only the rejection runs there; the main fixture of controller-rs `scripts/dev-star.py` adds one and covers both
-outcomes on main and extension terminals.
+others reject with `UNAVAILABLE` instead of opening their primary lock. It relaunches the primary URL at the end. Each
+opening passes an `{actor, action}` context, and the observed lock event must name the expected lock with exactly that
+attribution, while the other side's lock stays closed. The bundled `single` fixture has no secondary locks, so only the
+rejection runs there; the main fixture of controller-rs `scripts/dev-star.py` adds one and covers both outcomes.
+
+These checks need the development simulator: a lock event reports only a change, so before each opening the test
+closes both of the box's locks with `POST /dev/simulate` (`locking:LockStatusChanged` to `Closed`), waits until
+`GET /dev/state` shows them closed, and afterwards requires the `OPENED` outcome there. Both routes exist only on a
+controller running a `dev` fixture with simulated hardware. An extension terminal has no simulator of its own, so set
+`CONTROLLER_SIMULATOR_URL` to the main controller (default: `CONTROLLER_URL`):
+
+```shell
+CONTROLLER_URL=http://127.0.0.1:19001 CONTROLLER_SIMULATOR_URL=http://127.0.0.1:19000 npm run test:controller
+```
 
 Expected fixture: installed `dev-app` at `http://localhost:5173/?mode=dev#/home`, allowed local drivers `kiosk` and `unit`,
 available boxes, `configuration` JSON `{theme:"light"}`, `nullable` JSON null,

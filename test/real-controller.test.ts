@@ -1,4 +1,11 @@
-import {bootstrapSession, connect, type ControllerSession, type Cube, type LockEvent} from "@variocube/cube-app-sdk";
+import {
+	bootstrapSession,
+	type Compartment,
+	connect,
+	type ControllerSession,
+	type Cube,
+	type LockEvent,
+} from "@variocube/cube-app-sdk";
 import {afterAll, beforeAll, expect, test, vi} from "vitest";
 import {WebSocket} from "ws";
 // The SDK refuses to send a non-object patch, so the shared vectors reach the controller only with
@@ -8,6 +15,8 @@ import {type Launch, MockDriver, MockKiosk} from "./mock-driver";
 
 // Run an isolated native controller dev --fixture single, then set CONTROLLER_URL.
 const endpoint = process.env.CONTROLLER_URL ?? "http://localhost:9000";
+// The development simulator that owns the locks. An extension terminal has none; its locks are simulated on main.
+const simulator = process.env.CONTROLLER_SIMULATOR_URL ?? endpoint;
 const appUrl = "http://localhost:5173/?mode=dev#/home";
 // A kiosk with SECONDARY=true adds this parameter; the controller derives the terminal's side from it.
 const secondaryUrl = "http://localhost:5173/?mode=dev&secondary=true#/home";
@@ -200,14 +209,14 @@ test("shared merge-patch vectors against the native controller", async () => {
 });
 
 // A compartment opens only with a lock on the terminal's own side, never the other one. Which lock opened, and for
-// whom, shows in the observed lock event; see `expectOpen` for when there is one.
+// whom, shows in the observed lock event.
 test("openCompartment on a primary terminal opens compartments with a primary lock", async () => {
 	expect(cube.secondary).toBe(false);
 	const boxes = freeCompartments();
 	expect(boxes.some(box => box.lock)).toBe(true);
 	for (const box of boxes) {
 		expect(cube.getCompartmentLock(box.number)).toBe(box.lock);
-		await expectOpen(box.number, box.lock);
+		await expectOpen(box, "lock");
 	}
 	await expect(cube.openCompartment("no-such-compartment")).rejects.toMatchObject({code: "NOT_FOUND"});
 });
@@ -227,7 +236,7 @@ test("openCompartment on a secondary terminal opens only secondary locks", async
 		expect(boxes.length).toBeGreaterThan(0);
 		for (const box of boxes) {
 			expect(cube.getCompartmentLock(box.number)).toBe(box.secondaryLock);
-			await expectOpen(box.number, box.secondaryLock);
+			await expectOpen(box, "secondaryLock");
 		}
 	}
 	finally {
@@ -237,32 +246,66 @@ test("openCompartment on a secondary terminal opens only secondary locks", async
 });
 
 /**
- * A compartment with a lock on this side opens, and its lock event names that lock and the app's attribution. One
- * without is UNAVAILABLE rather than opening the other side.
+ * A compartment with a lock on this side opens exactly that lock, and its lock event carries the app's attribution.
+ * One without is UNAVAILABLE rather than opening the other side.
  */
-async function expectOpen(number: string, lock: string | undefined) {
+async function expectOpen(box: Compartment, side: "lock" | "secondaryLock") {
+	const lock = box[side];
+	const other = box[side === "lock" ? "secondaryLock" : "lock"];
+	// A lock event reports only an observed change, so both of the box's locks start closed: the expected one then
+	// has to change, and opening the other one would show as well. Locks stay open from earlier runs or terminals.
+	for (const id of [lock, other]) if (id) await closeLock(id);
 	const context = {actor: `sdk-native:${crypto.randomUUID()}`, action: "collect"};
 	const events: LockEvent[] = [];
 	const remove = cube.addEventListener("lock", event => events.push(event));
 	try {
-		const opened = cube.openCompartment(number, context);
+		const opened = cube.openCompartment(box.number, context);
 		if (!lock) {
 			await expect(opened).rejects.toMatchObject({code: "UNAVAILABLE"});
 			return;
 		}
-		// The ACK passes the controller's dispatch outcome through. A lock event reports only an observed status
-		// change, and a lock an earlier run or another terminal of this cube opened stays open in the simulator, so
-		// ALREADY_OPEN has no event to check. Any other outcome must produce one.
-		const result = await opened as unknown as { outcome?: string } | undefined;
-		if (result?.outcome === "ALREADY_OPEN") return;
+		await opened;
 		await vi.waitFor(
 			() => expect(events).toContainEqual(expect.objectContaining({lock, status: "OPEN", ...context})),
 			{timeout: 10000},
 		);
-		// Only this lock opened, never the other side's.
 		expect(events.filter(event => event.status === "OPEN").map(event => event.lock)).toEqual([lock]);
+		const command = (await simulatorState()).commands.find(command => command.kind === "locking:OpenLock");
+		expect(command).toMatchObject({device: lock, outcome: "OPENED"});
 	}
 	finally {
 		remove();
 	}
+}
+
+interface SimulatorState {
+	locks: Array<{ id: string; status: string }>;
+	/** Newest first. */
+	commands: Array<{ kind: string; device: string; outcome: string }>;
+}
+
+async function simulatorState(): Promise<SimulatorState> {
+	const response = await fetch(new URL("/dev/state", simulator));
+	expect(response.ok, `${simulator} must be a development controller with simulated hardware`).toBe(true);
+	return await response.json() as SimulatorState;
+}
+
+/**
+ * Closes a simulated lock through the development simulator. Injections are awaited one at a time: concurrent ones
+ * for the same lock may apply in either order. The simulator's state must show the lock closed before it is opened.
+ */
+async function closeLock(lock: string) {
+	const response = await fetch(new URL("/dev/simulate", simulator), {
+		method: "POST",
+		headers: {"Content-Type": "application/json"},
+		body: JSON.stringify({
+			operation: "driver",
+			message: {"@type": "locking:LockStatusChanged", id: lock, status: "Closed"},
+		}),
+	});
+	expect(response.ok, `${simulator}/dev/simulate must accept simulated lock status`).toBe(true);
+	expect(await response.json()).toMatchObject({accepted: true});
+	await vi.waitFor(async () => {
+		expect((await simulatorState()).locks.find(entry => entry.id === lock)?.status).toBe("Closed");
+	}, {timeout: 10000});
 }
