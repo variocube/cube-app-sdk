@@ -68,7 +68,8 @@ export class MockKiosk extends MockDriver {
 		super(endpoint, "kiosk", {id: "sdk-test-kiosk", type: "Kiosk"});
 	}
 
-	launch(): Promise<Launch> {
-		return this.client.send({"@type": "kiosk:Launch", id: this.id, url: this.appUrl});
+	/** Launches the app URL, or a variant of it such as the one a kiosk on the secondary side launches. */
+	launch(url = this.appUrl): Promise<Launch> {
+		return this.client.send({"@type": "kiosk:Launch", id: this.id, url});
 	}
 }

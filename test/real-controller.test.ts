@@ -4,11 +4,14 @@ import {WebSocket} from "ws";
 // The SDK refuses to send a non-object patch, so the shared vectors reach the controller only with
 // that client-side guard stubbed. Imported from source, like the packages' own unit tests.
 import {contentPatchSchema} from "../packages/cube-app-sdk/src/schema.js";
-import {MockDriver, MockKiosk} from "./mock-driver";
+import {type Launch, MockDriver, MockKiosk} from "./mock-driver";
 
 // Run an isolated native controller dev --fixture single, then set CONTROLLER_URL.
 const endpoint = process.env.CONTROLLER_URL ?? "http://localhost:9000";
-const kiosk = new MockKiosk(endpoint, "http://localhost:5173/?mode=dev#/home");
+const appUrl = "http://localhost:5173/?mode=dev#/home";
+// A kiosk with SECONDARY=true adds this parameter; the controller derives the terminal's side from it.
+const secondaryUrl = "http://localhost:5173/?mode=dev&secondary=true#/home";
+const kiosk = new MockKiosk(endpoint, appUrl);
 const unit = new MockDriver(endpoint, "unit", {id: "sdk-test-unit", type: "ComputeUnit"});
 let cube: Cube;
 let session: ControllerSession;
@@ -16,7 +19,19 @@ let session: ControllerSession;
 beforeAll(async () => {
 	await kiosk.start();
 	await unit.start();
-	const launch = await kiosk.launch();
+	({session, cube} = await connectLaunch(await kiosk.launch()));
+});
+
+afterAll(() => {
+	cube?.close();
+	session?.close();
+	kiosk.stop();
+	unit.stop();
+	vi.unstubAllGlobals();
+});
+
+/** Exchanges a launch's grant like the app's first page load and connects the SDK until it is ready. */
+async function connectLaunch(launch: Launch): Promise<{ session: ControllerSession; cube: Cube }> {
 	const origin = new URL(launch.url).origin;
 	class AppWebSocket extends WebSocket {
 		constructor(url: string) {
@@ -30,7 +45,7 @@ beforeAll(async () => {
 		headers.set("Origin", origin);
 		return fetch(input, {...options, headers});
 	};
-	session = await bootstrapSession({
+	const session = await bootstrapSession({
 		endpoint,
 		location: {href: launch.url},
 		history: {
@@ -42,17 +57,17 @@ beforeAll(async () => {
 		fetch: browserFetch,
 	});
 	expect(cleaned).not.toContain("vc-bootstrap");
-	cube = connect({session});
+	const cube = connect({session});
 	await vi.waitFor(() => expect(cube.connection.status).toBe("ready"), {timeout: 10000});
-});
+	return {session, cube};
+}
 
-afterAll(() => {
-	cube?.close();
-	session?.close();
-	kiosk.stop();
-	unit.stop();
-	vi.unstubAllGlobals();
-});
+/** Enabled compartments without an active occupancy, which an app may open. */
+function freeCompartments() {
+	return cube.compartments.filter(box =>
+		box.enabled && !cube.occupancies.list().some(o => o.boxNumber === box.number)
+	);
+}
 
 test("native authenticated reserve/confirm/access/update/end and read-only JSON/binary storage", async () => {
 	expect(cube.identity?.appId).toBe("dev-app");
@@ -183,3 +198,48 @@ test("shared merge-patch vectors against the native controller", async () => {
 		await cube.occupancies.cancel(record.uuid);
 	}
 });
+
+// Which lock the controller dispatched is not visible to an app: a lock event only reports a status change, and a
+// lock that an earlier run or terminal already opened does not change. So these tests pin the side through the
+// controller's acceptance: a compartment opens only with a lock on the terminal's own side, never the other one.
+test("openCompartment on a primary terminal opens compartments with a primary lock", async () => {
+	expect(cube.secondary).toBe(false);
+	const boxes = freeCompartments();
+	expect(boxes.some(box => box.lock)).toBe(true);
+	for (const box of boxes) {
+		expect(cube.getCompartmentLock(box.number)).toBe(box.lock);
+		await expectOpen(box.number, box.lock);
+	}
+	await expect(cube.openCompartment("no-such-compartment")).rejects.toMatchObject({code: "NOT_FOUND"});
+});
+
+// Keep this last: moving the terminal to the other side ends the sessions every other test uses.
+test("openCompartment on a secondary terminal opens only secondary locks", async () => {
+	const primary = cube;
+	const launch = await kiosk.launch(secondaryUrl);
+	// A side change ends the terminal's sessions like an app change, so the primary connection cannot stay ready.
+	await vi.waitFor(() => expect(primary.connection.status).not.toBe("ready"), {timeout: 10000});
+	primary.close();
+	session.close();
+	({session, cube} = await connectLaunch(launch));
+	try {
+		expect(cube.secondary).toBe(true);
+		const boxes = freeCompartments();
+		expect(boxes.length).toBeGreaterThan(0);
+		for (const box of boxes) {
+			expect(cube.getCompartmentLock(box.number)).toBe(box.secondaryLock);
+			await expectOpen(box.number, box.secondaryLock);
+		}
+	}
+	finally {
+		// Leave the terminal on the primary side, as a fresh controller starts.
+		await kiosk.launch();
+	}
+});
+
+/** A compartment with a lock on this side opens; one without is UNAVAILABLE rather than opening the other side. */
+async function expectOpen(number: string, lock: string | undefined) {
+	const opened = cube.openCompartment(number, {actor: "sdk-native", action: "open"});
+	if (lock) await opened;
+	else await expect(opened).rejects.toMatchObject({code: "UNAVAILABLE"});
+}
