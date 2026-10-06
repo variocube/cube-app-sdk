@@ -364,6 +364,33 @@ describe("occupancy, identity and connection hooks", () => {
 	});
 });
 
+describe("deprecated secondary prop", () => {
+	it("is neither passed to connect nor replaces the connection when it changes", async () => {
+		const session: ControllerSession = {endpoint: "https://side.example", openMaintenance: vi.fn(), close: vi.fn()};
+		function Probe() {
+			return <output>{JSON.stringify({connected: useConnected()})}</output>;
+		}
+		await act(async () =>
+			root.render(
+				<CubeProvider session={session} secondary>
+					<Probe />
+				</CubeProvider>,
+			)
+		);
+		expect(vi.mocked(connect).mock.calls).toEqual([[{session}]]);
+		await act(async () =>
+			root.render(
+				<CubeProvider session={session} secondary={false}>
+					<Probe />
+				</CubeProvider>,
+			)
+		);
+		expect(connect).toHaveBeenCalledTimes(1);
+		expect(cube.close).not.toHaveBeenCalled();
+		expect(output()).toEqual({connected: true});
+	});
+});
+
 describe("keyed occupancy lookup", () => {
 	it("distinguishes loading, absence and retained ended records independently of active lists", async () => {
 		function Probe() {
