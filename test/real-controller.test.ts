@@ -159,14 +159,16 @@ test("shared merge-patch vectors against the native controller", async () => {
 					code: "INVALID_REQUEST",
 				});
 				// Then again on the wire: the fixture is shared with controller-rs to pin the
-				// controller's own rejection, which the local guard would otherwise hide.
+				// controller's own rejection, which the local guard would otherwise hide. The
+				// fixture's `error` only marks the vector as rejected; the controller's wire code
+				// for an invalid patch is INVALID_REQUEST.
 				const guard = vi.spyOn(contentPatchSchema, "safeParse").mockReturnValue({
 					success: true,
 					data: patch,
 				});
 				try {
 					await expect(cube.occupancies.patch(record.uuid, patch)).rejects.toMatchObject({
-						code: vector.error,
+						code: "INVALID_REQUEST",
 					});
 				}
 				finally {
