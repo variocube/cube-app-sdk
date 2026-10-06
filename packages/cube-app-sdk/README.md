@@ -4,8 +4,8 @@ SDK major 2 requires Rust controller major 6. `bootstrapSession()` cleans the ki
 router/application startup, exchanges its one-use grant, and returns an in-memory `ControllerSession`.
 `connect({session})` exposes mandatory occupancy, storage, identity and hardware APIs directly over `/app`. App,
 terminal authority and the terminal's side of the cube remain server-resolved: `openCompartment` sends `openBox` and the
-controller opens the lock on the terminal's side, and `cube.secondary` reports that side. The `secondary` connect
-option is deprecated and ignored.
+controller opens the lock on the terminal's side, and the read-only `cube.secondary` reports that side. Apps do not
+choose the side.
 
 See the [root README](../../README.md) for workflows and the [wire contract](../../docs/controller-6.md) for protocol,
 source provenance, limits and validation. There is no capability discovery or hardware-only feature fallback.

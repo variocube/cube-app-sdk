@@ -49,8 +49,7 @@ const CubeContext = createContext<CubeContextContent>({
  */
 export function CubeProvider(props: PropsWithChildren<ConnectOptions>) {
 	// A changed session owns a new connection and subtree. Never render the old cube's
-	// identity or business data while the replacement connection is being established. The deprecated `secondary`
-	// prop is ignored: the controller reports the terminal's side, so it does not replace the connection either.
+	// identity or business data while the replacement connection is being established.
 	return <CubeConnection key={sessionKey(props.session)} {...props} />;
 }
 

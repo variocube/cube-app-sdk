@@ -2,7 +2,7 @@
 
 `CubeProvider` owns a single SDK connection. Its hooks subscribe to that connection and remove subscriptions on unmount;
 changing the authenticated session, endpoint or generation replaces the connection. No browser persistence is used.
-The `secondary` prop is deprecated and ignored: the controller reports the terminal's side as `cube.secondary`, and
+There is no `secondary` prop: the controller reports the terminal's side as `cube.secondary`, and
 `useCompartmentLockStatus` follows it.
 
 ```tsx

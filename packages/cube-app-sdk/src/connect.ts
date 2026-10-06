@@ -6,11 +6,6 @@ import type {Cube} from "./types.js";
 export interface ConnectOptions {
 	/** Returned by bootstrapSession() before application/router startup. */
 	session: ControllerSession;
-	/**
-	 * Ignored. The controller reports the terminal's side when the connection authenticates; see `Cube.secondary`.
-	 * @deprecated The side is no longer configured in the app. Remove this option.
-	 */
-	secondary?: boolean;
 }
 
 /** Connect directly to controller major 6 using an in-memory authenticated session. */

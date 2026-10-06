@@ -99,11 +99,11 @@ rotations; they are not identity changes.
 ## Upgrading from SDK 1
 
 - Bootstrap a session before application startup and pass it to `connect({session})` / `<CubeProvider session>`.
-- The terminal's side of the cube comes from the controller. Remove the `secondary` connect option and
-  `CubeProvider` prop; they are deprecated and ignored. Do not forward the kiosk's `secondary=true` URL parameter: the
-  controller derives the side from the kiosk launch. `openCompartment` opens that side's lock and rejects a
-  compartment without one with `UNAVAILABLE` instead of the former local `NOT_FOUND`. `UNAVAILABLE` also covers a lock
-  or owning terminal that is unreachable for now, so it is no reason to hide or disable the compartment.
+- The terminal's side of the cube comes from the controller, which derives it from the kiosk launch. The `secondary`
+  connect option, the `CubeProvider` prop and SDK 1's `?secondary=` URL parsing are gone; `cube.secondary` is read-only
+  and reports the side the controller sent when the connection authenticated. `openCompartment` opens that side's lock
+  and rejects a compartment without one with `UNAVAILABLE` instead of the former local `NOT_FOUND`. `UNAVAILABLE` also
+  covers a lock or owning terminal that is unreachable for now, so it is no reason to hide or disable the compartment.
 
 ## Native development and checks
 

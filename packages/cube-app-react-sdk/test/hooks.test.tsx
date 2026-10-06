@@ -8,9 +8,9 @@ import {
 	CubeIdentity,
 	Occupancy,
 } from "@variocube/cube-app-sdk";
-import React, {act} from "react";
+import React, {act, type ComponentProps} from "react";
 import {createRoot, Root} from "react-dom/client";
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, describe, expect, expectTypeOf, it, vi} from "vitest";
 import {
 	bootstrapSession,
 	CubeProvider,
@@ -364,30 +364,9 @@ describe("occupancy, identity and connection hooks", () => {
 	});
 });
 
-describe("deprecated secondary prop", () => {
-	it("is neither passed to connect nor replaces the connection when it changes", async () => {
-		const session: ControllerSession = {endpoint: "https://side.example", openMaintenance: vi.fn(), close: vi.fn()};
-		function Probe() {
-			return <output>{JSON.stringify({connected: useConnected()})}</output>;
-		}
-		await act(async () =>
-			root.render(
-				<CubeProvider session={session} secondary>
-					<Probe />
-				</CubeProvider>,
-			)
-		);
-		expect(vi.mocked(connect).mock.calls).toEqual([[{session}]]);
-		await act(async () =>
-			root.render(
-				<CubeProvider session={session} secondary={false}>
-					<Probe />
-				</CubeProvider>,
-			)
-		);
-		expect(connect).toHaveBeenCalledTimes(1);
-		expect(cube.close).not.toHaveBeenCalled();
-		expect(output()).toEqual({connected: true});
+describe("terminal side", () => {
+	it("leaves the side to the controller: CubeProvider takes no secondary prop", () => {
+		expectTypeOf<ComponentProps<typeof CubeProvider>>().not.toHaveProperty("secondary");
 	});
 });
 

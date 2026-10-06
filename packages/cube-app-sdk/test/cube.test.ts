@@ -1,7 +1,7 @@
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, describe, expect, expectTypeOf, it, vi} from "vitest";
 import occupancyWire from "../../../test/fixtures/controller-6-occupancy-wire.json";
 import fixture from "../../../test/fixtures/controller-wire.json";
-import {connect} from "../src/connect.js";
+import type {ConnectOptions} from "../src/connect.js";
 import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
 import type {CubeMessageIdentity, StorageItem} from "../src/messages.js";
@@ -816,22 +816,8 @@ describe("terminal side and openBox", () => {
 		expect(cube.secondary).toBe(false);
 	});
 
-	it("ignores the deprecated secondary connect option", async () => {
-		cube.close();
-		cube = connect({
-			session: new ControllerSession("http://localhost:9000", fetch, {
-				credential: "test-credential-123456",
-				expiresAt: Math.floor(Date.now() / 1000) + 600,
-				generation: 1,
-			}),
-			secondary: true,
-		}) as CubeImpl;
-		socket = Socket.instances.at(-1)!;
-		socket.open();
-		expect(cube.secondary).toBe(false);
-		await readyOnSide({secondary: false});
-		expect(cube.secondary).toBe(false);
-		expect(cube.getCompartmentLock("1")).toBe("lock-1");
+	it("leaves the side to the controller: connect takes no secondary option", () => {
+		expectTypeOf<ConnectOptions>().not.toHaveProperty("secondary");
 	});
 });
 

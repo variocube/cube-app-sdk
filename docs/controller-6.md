@@ -23,7 +23,8 @@ its original leading `#` or is empty. Cleanup happens synchronously, including m
 WebSocket `/app` uses VCMP. First request: `{ "@type":"authenticate", "protocolMajor":6, "credential":"..." }`.
 Its ACK is `{protocolMajor:6,generation,secondary}`. `secondary` is the authenticated terminal's side of the cube
 ([controller-rs #34](https://github.com/variocube/controller-rs/issues/34)); the SDK takes it from every
-authentication and treats an absent field, from an earlier controller 6 prerelease, as primary.
+authentication and treats an absent field, from an earlier controller 6 prerelease, as primary. Apps cannot choose
+the side: `connect` and `CubeProvider` take no `secondary` option, and `cube.secondary` is read-only.
 
 Until the ACK validates, the SDK buffers at most one initial snapshot plus 64 events within 256 KiB;
 rejected/disconnected authentication discards that buffer without publishing protected data. The initial event is:
