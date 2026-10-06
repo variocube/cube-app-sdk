@@ -67,7 +67,9 @@ compartments boxes: `boxNumber` is a `Compartment.number`. Authorization is enfo
 side of the cube: its `secondaryLock` on a secondary terminal, its `lock` otherwise. A compartment without a lock on
 that side rejects with `UNAVAILABLE`; it never opens the other side. `cube.secondary` is the side the controller
 reported when the connection authenticated (`false` before that), and `getCompartmentLock(number)` returns the lock
-`openCompartment` opens. `openLock(lock)` still addresses one specific lock.
+`openCompartment` opens. `openLock(lock)` still addresses one specific lock. Both take an optional `{actor, action}`
+context; the controller records it on the opening and on the resulting `lock` event, whose `actor` is the app's own
+attribution when the context names none.
 
 `occupancies.list(access?)` and `occupancies.get(uuid)` are synchronous reads of the latest pushed snapshot; `get`
 returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown

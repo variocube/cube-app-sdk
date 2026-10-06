@@ -34,12 +34,13 @@ export interface LockEvent {
 	status: LockStatus;
 
 	/**
-	 * The actor that was passed in the open command leading to this lock event.
+	 * The actor of the open command leading to this lock event: the `OpenContext.actor` the app passed, or the
+	 * controller's own attribution (such as `app:<id>@<terminal>`) when it passed none.
 	 */
 	actor?: string;
 
 	/**
-	 * The action that was passed in the open command leading to this lock event.
+	 * The action that was passed in the open command leading to this lock event (`OpenContext.action`).
 	 */
 	action?: string;
 }
@@ -166,10 +167,17 @@ export interface Device {
 
 /** The context of opening a lock/compartment. */
 export interface OpenContext {
-	/** The actor who is opening the lock/compartment. */
+	/**
+	 * The actor who is opening the lock/compartment, such as a customer or courier reference. The controller records
+	 * it on the opening and on the resulting lock event (`LockEvent.actor`) instead of the app's own attribution. An
+	 * actor longer than 128 bytes is ignored.
+	 */
 	actor?: string;
 
-	/** The action associated with opening the lock/compartment. */
+	/**
+	 * The action associated with opening the lock/compartment, recorded on the resulting lock event
+	 * (`LockEvent.action`). An action longer than 128 bytes is ignored.
+	 */
 	action?: string;
 }
 

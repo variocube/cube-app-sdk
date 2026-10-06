@@ -53,7 +53,9 @@ for the expected UUID/state when reconciling. No mutation is replayed automatica
 `openCompartment(number, context?)` sends `{ "@type":"openBox", "number":"1", "actor"?, "action"? }`. The controller
 resolves the box's lock on the requesting terminal's side and rejects a box without one with `UNAVAILABLE`, never
 falling back to the other side. The SDK checks only that the compartment exists in its snapshot (`NOT_FOUND`).
-`openLock(lock, context?)` sends `openLock` for a specific lock and is unchanged.
+`openLock(lock, context?)` sends `openLock` for a specific lock and is unchanged. Both carry the `OpenContext`
+attribution: the controller records the app's `actor` (at most 128 bytes) instead of its derived
+`app:<id>@<terminal>`, and `action`, on the opening and on the resulting `lock` event.
 
 Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
 publication uses the contiguous per-session revision, including storage chunks and the ready barrier:

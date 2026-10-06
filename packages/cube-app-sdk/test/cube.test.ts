@@ -717,6 +717,25 @@ describe("terminal side and openBox", () => {
 		]);
 		socket.reply(socket.request("openBox"));
 		await expect(opened).resolves.toBeUndefined();
+		// The controller records the app's attribution on the resulting observed lock event.
+		const locks = vi.fn();
+		cube.addEventListener("lock", locks);
+		socket.event({
+			"@type": "lock",
+			lock: "lock-2",
+			compartmentNumber: "2",
+			status: "OPEN",
+			actor: "customer",
+			action: "collect",
+		});
+		await flush();
+		expect(locks).toHaveBeenCalledWith(expect.objectContaining({
+			lock: "lock-2",
+			compartmentNumber: "2",
+			status: "OPEN",
+			actor: "customer",
+			action: "collect",
+		}));
 		const bare = cube.openCompartment("1");
 		expect(JSON.parse(socket.request("openBox").slice(15))).toEqual({"@type": "openBox", number: "1"});
 		socket.reply(socket.request("openBox"));
