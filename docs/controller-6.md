@@ -72,15 +72,20 @@ publication uses the contiguous per-session revision, including storage chunks a
   `identity` event, so a rotation is not a public identity change. `getToken()` validates the current cached audience and
   expiry; it never requests a replacement token. Controller renewal must arrive before expiry.
 
-Storage holds the complete app snapshot without eviction: at most 16384 keys, 1 MiB + 4096 bytes per serialized item,
-68 MiB total serialized content, and one incomplete transfer. This covers the supported 64 MiB persisted store plus
-wire metadata. Overflow, malformed chunks and incomplete transfers fail closed. Disconnect or a changed app generation
-clears all caches; an incomplete snapshot never becomes ready or reports missing data as an empty store. A complete
-same-generation resnapshot can replace data at its ready barrier; it does not retry pending mutations.
+Storage holds the complete app snapshot without eviction: at most 16384 keys, 10 MiB + 4096 bytes per serialized item
+(the controller's 10 MiB record limit, controller-rs#150, plus wire metadata), 68 MiB total serialized content, and one
+incomplete transfer. This covers the supported 64 MiB persisted store plus wire metadata. Overflow, malformed chunks
+and incomplete transfers fail closed. Disconnect or a changed app generation clears all caches; an incomplete snapshot
+never becomes ready or reports missing data as an empty store. A complete same-generation resnapshot can replace data
+at its ready barrier; it does not retry pending mutations.
 
 Zod validates event and response boundaries. At most 64 mutation requests and 64 KiB per request are admitted, with a
 10-second deadline. Timeouts close the underlying VCMP session to reclaim correlations and report
-`COMMAND_OUTCOME_UNKNOWN`. Authentication/initial storage and each chunked item also have bounded deadlines.
+`COMMAND_OUTCOME_UNKNOWN`. Authentication and `initialState` must arrive within 10 seconds of the socket opening. The
+storage deadlines measure progress, so a large snapshot or item may take longer as long as data keeps arriving: the
+initial snapshot fails with `TIMEOUT` when 10 seconds pass between consecutive publications from
+`initialState` to `ready` (storage items, deletions and chunks), and a chunked item fails with `TIMEOUT` when 10 seconds
+pass without its next chunk.
 
 `session.openMaintenance()` navigates normally to the trusted controller's `/maintenance?returnUrl=...`, carrying only
 the clean current app URL. It requests no maintenance context and passes no credential in that URL. Technician login

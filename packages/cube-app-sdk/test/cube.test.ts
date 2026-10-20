@@ -122,19 +122,16 @@ async function ready(data: Occupancy[] = [], items: StorageItem[] = fixture.stor
 	socket.event({"@type": "ready"});
 	await flush();
 }
-function chunks(item: StorageItem, size = 48 * 1024) {
+function chunkEvents(item: StorageItem, size = 48 * 1024) {
 	const bytes = new TextEncoder().encode(JSON.stringify(item));
 	const total = Math.ceil(bytes.length / size);
-	for (let index = 0; index < total; index++) {
+	return Array.from({length: total}, (_, index) => {
 		const part = bytes.slice(index * size, (index + 1) * size);
-		socket.event({
-			"@type": "storageChunk",
-			key: item.key,
-			index,
-			total,
-			content: btoa(String.fromCharCode(...part)),
-		});
-	}
+		return {"@type": "storageChunk", key: item.key, index, total, content: btoa(String.fromCharCode(...part))};
+	});
+}
+function chunks(item: StorageItem, size = 48 * 1024) {
+	for (const event of chunkEvents(item, size)) socket.event(event);
 }
 
 beforeEach(() => {
@@ -267,18 +264,26 @@ describe("pushed state and local reads", () => {
 		expect(cube.occupancies.get("one")).toBeUndefined();
 	});
 
-	it.each(["duplicate", "out of order", "wrong key", "oversized", "truncated"])(
+	it.each(["duplicate", "out of order", "wrong key", "oversized", "over the item limit", "truncated"])(
 		"rejects %s storage chunks without retaining partial data",
 		async kind => {
 			await authenticate();
 			initial();
 			await flush();
-			const part = {"@type": "storageChunk", key: "key", index: 0, total: 2, content: btoa("{")};
+			const total = kind === "over the item limit" ? 1000 : 2;
+			const part = {"@type": "storageChunk", key: "key", index: 0, total, content: btoa("{")};
 			socket.event(part);
 			if (kind === "duplicate") socket.event(part);
 			if (kind === "out of order") socket.event({...part, index: 2});
 			if (kind === "wrong key") socket.event({...part, index: 1, key: "other"});
 			if (kind === "oversized") socket.event({...part, index: 1, content: btoa("x".repeat(48 * 1024 + 1))});
+			if (kind === "over the item limit") {
+				// The chunk count is not capped, so the assembled bytes are what bound a transfer.
+				const content = btoa("x".repeat(48 * 1024));
+				for (let index = 1; index <= Math.ceil((10 * 1048576 + 4096) / (48 * 1024)); index++) {
+					socket.event({...part, index, content});
+				}
+			}
 			if (kind === "truncated") socket.event({"@type": "ready"});
 			await flush();
 			expect(cube.connection.status).toBe("error");
@@ -286,6 +291,87 @@ describe("pushed state and local reads", () => {
 			expect(() => cube.storage.get("key")).toThrow(expect.objectContaining({code: "INVALID_RESPONSE"}));
 		},
 	);
+
+	it("assembles an item at the 10 MiB + 4096 byte limit before reporting ready", async () => {
+		await authenticate();
+		initial();
+		const limit = 10 * 1048576 + 4096;
+		const item = {key: "max", contentType: "application/json", encoding: "json", content: ""} satisfies StorageItem;
+		item.content = "x".repeat(limit - JSON.stringify(item).length);
+		// A controller with a lower message limit sends chunks smaller than 48 KiB, so the item takes more chunks.
+		chunks(item, 45 * 1024);
+		socket.event({"@type": "ready"});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.storage.get("max")).toHaveLength(item.content.length);
+	});
+
+	it("allows each storage chunk 10 seconds, however long the whole transfer takes", async () => {
+		await ready();
+		const item = {
+			key: "slow",
+			contentType: "application/json",
+			encoding: "json",
+			content: "x".repeat(64),
+		} satisfies StorageItem;
+		const events = chunkEvents(item, 32);
+		expect(events.length).toBeGreaterThan(2);
+		for (const [index, event] of events.entries()) {
+			if (index > 0) await vi.advanceTimersByTimeAsync(9999);
+			socket.event(event);
+		}
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.storage.get("slow")).toBe(item.content);
+		const [first, second] = chunkEvents({...item, key: "stalled"}, 32);
+		socket.event(first);
+		await vi.advanceTimersByTimeAsync(9999);
+		socket.event(second);
+		await vi.advanceTimersByTimeAsync(9999);
+		expect(cube.connection.status).toBe("ready");
+		await vi.advanceTimersByTimeAsync(1);
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "TIMEOUT"}});
+	});
+
+	it("allows the initial snapshot 10 seconds per publication, however long it takes until ready", async () => {
+		await authenticate();
+		initial();
+		const item = {key: "a", contentType: "application/json", encoding: "json", content: "x".repeat(64)} as const;
+		const publications = [
+			{"@type": "storageItem", ...item},
+			...chunkEvents({...item, key: "b"}, 64),
+			{"@type": "storageItemRemoved", key: "a"},
+		];
+		for (const event of publications) {
+			await vi.advanceTimersByTimeAsync(6000);
+			socket.event(event);
+		}
+		await flush();
+		expect(cube.connection.status).toBe("initializing");
+		socket.event({"@type": "ready"});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.storage.keys()).toEqual(["b"]);
+		// Pushes after ready are not part of the initial snapshot and arm no deadline.
+		socket.event({"@type": "storageItem", ...item});
+		socket.event({"@type": "storageItemRemoved", key: "b"});
+		for (const event of chunkEvents({...item, key: "c"}, 64)) socket.event(event);
+		await flush();
+		expect(cube.storage.keys()).toEqual(["a", "c"]);
+		await vi.advanceTimersByTimeAsync(10000);
+		expect(cube.connection.status).toBe("ready");
+		initial([], socket.revision + 1);
+		socket.event({"@type": "storageItem", ...item});
+		await vi.advanceTimersByTimeAsync(6000);
+		socket.event({"@type": "storageItemRemoved", key: "a"});
+		await vi.advanceTimersByTimeAsync(9999);
+		expect(cube.connection.status).toBe("initializing");
+		await vi.advanceTimersByTimeAsync(1);
+		expect(cube.connection).toMatchObject({
+			status: "error",
+			error: {code: "TIMEOUT", message: "Initial storage timed out."},
+		});
+	});
 
 	it("bounds incomplete transfers and never reports an incomplete snapshot ready", async () => {
 		await authenticate();
@@ -315,7 +401,7 @@ describe("pushed state and local reads", () => {
 			key: "oversize",
 			contentType: "application/json",
 			encoding: "json",
-			content: "x".repeat(1048576 + 4096),
+			content: "x".repeat(10 * 1048576 + 4096),
 		});
 		await flush();
 		expect(cube.connection).toMatchObject({status: "error", error: {code: "LIMIT_EXCEEDED"}});

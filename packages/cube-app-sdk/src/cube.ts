@@ -29,6 +29,7 @@ import {
 	initialStateSchema,
 	LOCK_STATUSES,
 	replySchema,
+	STORAGE_ITEM_BYTES,
 	storageSchema,
 } from "./schema.js";
 import {ControllerSessionImpl, PROTOCOL_MAJOR} from "./session.js";
@@ -59,7 +60,6 @@ const FEATURE_FLAGS: Record<CompartmentFeature, string> = {
 	CHARGER: "charger",
 };
 
-const STORAGE_ITEM_BYTES = 1048576 + 4096;
 const STORAGE_TOTAL_BYTES = 68 * 1048576;
 const STORAGE_CHUNK_BYTES = 48 * 1024;
 
@@ -261,11 +261,7 @@ export class CubeImpl implements Cube {
 			}
 			this.#storageAssembly = undefined;
 			clearTimeout(this.#storageTimer);
-			clearTimeout(this.#initialTimer);
-			this.#initialTimer = setTimeout(
-				() => this.#fail(new CubeError("TIMEOUT", "Initial storage timed out.")),
-				10000,
-			);
+			this.#armInitialStorageDeadline();
 			this.#storageItems.clear();
 			this.#storageSizes.clear();
 			this.#storageBytes = 0;
@@ -364,11 +360,13 @@ export class CubeImpl implements Cube {
 		});
 		this.#on<StorageItemMessage>("storageItem", event => {
 			if (this.#storageAssembly) throw new CubeError("INVALID_RESPONSE", "Storage chunks were interrupted.");
+			if (!this.connected) this.#armInitialStorageDeadline();
 			this.#storeItem(event);
 		});
 		this.#on<StorageChunkMessage>("storageChunk", event => this.#receiveStorageChunk(event));
 		this.#on<StorageItemRemovedMessage>("storageItemRemoved", event => {
 			if (this.#storageAssembly) throw new CubeError("INVALID_RESPONSE", "Storage chunks were interrupted.");
+			if (!this.connected) this.#armInitialStorageDeadline();
 			this.#storageBytes -= this.#storageSizes.get(event.key) ?? 0;
 			this.#storageSizes.delete(event.key);
 			this.#storageItems.delete(event.key);
@@ -495,6 +493,18 @@ export class CubeImpl implements Cube {
 		}, RECOVERY_DELAY_MS);
 	}
 
+	/**
+	 * Allows the initial snapshot another 10 seconds until `ready`, so the deadline measures progress rather than the
+	 * whole snapshot. Callers arm it before dispatching, so a listener that closes the cube resets it.
+	 */
+	#armInitialStorageDeadline() {
+		clearTimeout(this.#initialTimer);
+		this.#initialTimer = setTimeout(
+			() => this.#fail(new CubeError("TIMEOUT", "Initial storage timed out.")),
+			10000,
+		);
+	}
+
 	#resynchronize() {
 		this.#controllerConnected = false;
 		this.#reset({status: "initializing"});
@@ -552,10 +562,6 @@ export class CubeImpl implements Cube {
 		if (!this.#storageAssembly) {
 			if (event.index !== 0) throw new CubeError("INVALID_RESPONSE", "Missing first storage chunk.");
 			this.#storageAssembly = {key: event.key, total: event.total, parts: [], bytes: 0};
-			this.#storageTimer = setTimeout(
-				() => this.#fail(new CubeError("TIMEOUT", "Storage transfer timed out.")),
-				10000,
-			);
 		}
 		const assembly = this.#storageAssembly;
 		const bytes = decodeBase64(event.content);
@@ -568,17 +574,27 @@ export class CubeImpl implements Cube {
 		}
 		assembly.parts.push(bytes);
 		assembly.bytes += bytes.byteLength;
-		if (assembly.parts.length !== assembly.total) return;
+		if (!this.connected) this.#armInitialStorageDeadline();
+		// The deadline measures progress, not the whole item: each accepted chunk allows another 10 seconds.
+		clearTimeout(this.#storageTimer);
+		if (assembly.parts.length !== assembly.total) {
+			this.#storageTimer = setTimeout(
+				() => this.#fail(new CubeError("TIMEOUT", "Storage transfer timed out.")),
+				10000,
+			);
+			return;
+		}
 		const joined = new Uint8Array(assembly.bytes);
 		let offset = 0;
 		for (const part of assembly.parts) {
 			joined.set(part, offset);
 			offset += part.byteLength;
 		}
+		// The parts are not needed past this point, so they are not held while the joined item is parsed.
+		assembly.parts.length = 0;
+		this.#storageAssembly = undefined;
 		const item = storageSchema.parse(JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(joined)));
 		if (item.key !== assembly.key) throw new CubeError("INVALID_RESPONSE", "Storage chunk key changed.");
-		clearTimeout(this.#storageTimer);
-		this.#storageAssembly = undefined;
 		this.#storeItem(item);
 	}
 
