@@ -3,6 +3,8 @@ import {z} from "zod";
 const text = z.string().max(65536);
 const object = z.record(z.string(), z.unknown());
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+/** One serialized storage item: the controller's 10 MiB record limit (controller-rs#150) plus wire metadata. */
+export const STORAGE_ITEM_BYTES = 10 * 1048576 + 4096;
 export const identitySchema = z.object({
 	cubeId: text,
 	appId: text.min(1),
@@ -109,8 +111,10 @@ export const eventSchemas: Record<string, z.ZodType> = {
 	storageChunk: z.object({
 		...boundary,
 		key: text,
-		index: integer.max(21),
-		total: integer.min(1).max(22),
+		// A controller with a lower message limit sends smaller chunks, so only the item bytes bound the count: every
+		// chunk carries at least one byte and the assembly enforces the byte limit.
+		index: integer.max(STORAGE_ITEM_BYTES - 1),
+		total: integer.min(1).max(STORAGE_ITEM_BYTES),
 		content: z.string().max(65536),
 	}),
 	ready: z.object(boundary),
