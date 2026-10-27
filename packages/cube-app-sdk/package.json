@@ -22,7 +22,7 @@
   "dependencies": {
     "@variocube/driver-common": "^2.8.0",
     "@variocube/vcmp": "^4.0.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "files": [
     "esm/**"
