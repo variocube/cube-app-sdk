@@ -140,7 +140,8 @@ beforeEach(() => {
 	Socket.instances = [];
 	vi.stubGlobal("WebSocket", Socket);
 	cube = new CubeImpl({
-		session: new ControllerSession("http://localhost:9000", fetch, {
+		// Never the real fetch: a relaunch request would reach a development controller on this port.
+		session: new ControllerSession("http://localhost:9000", vi.fn<typeof fetch>(async () => new Response(null)), {
 			credential: "test-credential-123456",
 			expiresAt: Math.floor(Date.now() / 1000) + 600,
 			generation: 1,
@@ -904,6 +905,111 @@ describe("terminal side and openBox", () => {
 
 	it("leaves the side to the controller: connect takes no secondary option", () => {
 		expectTypeOf<ConnectOptions>().not.toHaveProperty("secondary");
+	});
+});
+
+describe("fresh kiosk launch requests", () => {
+	const RELAUNCH = "http://localhost:9000/app/relaunch";
+	const RENEW = "http://localhost:9000/app/renew";
+
+	/** The relaunch request is limited per page, so each test loads a fresh SDK, as a new page would. */
+	async function page(renewal: () => Response = () => new Response("secret", {status: 401})) {
+		cube.close();
+		vi.resetModules();
+		const {CubeImpl: Cube} = await import("../src/cube.js");
+		const {ControllerSessionImpl: Session} = await import("../src/session.js");
+		const transport = vi.fn<typeof fetch>(async input => {
+			if (String(input) === RENEW) return renewal();
+			return new Response(null, {status: 202});
+		});
+		const urls = () => transport.mock.calls.map(([input]) => String(input));
+		const open = () => {
+			const session = new Session("http://localhost:9000", transport, {
+				credential: "test-credential-123456",
+				expiresAt: Math.floor(Date.now() / 1000) + 600,
+				generation: 1,
+			});
+			cube = new Cube({session});
+			socket = Socket.instances.at(-1)!;
+			socket.open();
+			return session;
+		};
+		return {transport, urls, open};
+	}
+
+	async function rejectAuthentication() {
+		await flush();
+		const frame = socket.frames.find(frame =>
+			frame.startsWith("MSG") && JSON.parse(frame.slice(15))["@type"] === "authenticate"
+		)!;
+		// The controller's answer to a credential whose session it no longer has.
+		socket.reply(frame, {title: "UNAUTHORIZED", status: 401, code: "UNAUTHORIZED"}, "NAK");
+		await flush();
+	}
+
+	it("asks once when the controller rejects the socket credential and renewal confirms it", async () => {
+		const {transport, urls, open} = await page();
+		open();
+		await rejectAuthentication();
+		expect(cube.connection).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
+		expect(urls()).toEqual([RENEW, RELAUNCH]);
+		expect(new Headers(transport.mock.calls[1][1]?.headers).has("Authorization")).toBe(false);
+		expect(JSON.stringify(transport.mock.calls[1])).not.toContain("test-credential");
+		// Another rejection on the same page, by any path, does not ask again.
+		open();
+		await rejectAuthentication();
+		await vi.advanceTimersByTimeAsync(60000);
+		expect(cube.connection.status).toBe("unavailable");
+		expect(urls()).toEqual([RENEW, RELAUNCH, RENEW]);
+	});
+
+	it("retries a socket credential that a concurrent renewal replaced instead of asking", async () => {
+		const {urls, open} = await page(() =>
+			new Response(JSON.stringify({
+				credential: "renewed-credential-123456",
+				generation: 1,
+				expiresAt: Math.floor(Date.now() / 1000) + 600,
+			}))
+		);
+		open();
+		await rejectAuthentication();
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "UNAUTHORIZED"}});
+		await vi.advanceTimersByTimeAsync(10000);
+		socket = Socket.instances.at(-1)!;
+		socket.open();
+		await ready();
+		expect(cube.connection.status).toBe("ready");
+		expect(urls()).toEqual([RENEW]);
+	});
+
+	it("asks once when the installed app changes, before a listener can close the session", async () => {
+		const {urls, open} = await page();
+		const session = open();
+		cube.addEventListener("connection", ({connection}) => {
+			if (connection.status === "unavailable") session.close();
+		});
+		await ready();
+		socket.event({"@type": "cube", ...identity("other")});
+		await flush();
+		expect(cube.connection.status).toBe("unavailable");
+		expect(urls()).toEqual([RELAUNCH]);
+	});
+
+	it("does not ask when the app closes the session or opens maintenance", async () => {
+		const {urls, open} = await page();
+		open().close();
+		await flush();
+		expect(cube.connection).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
+		const assign = vi.fn();
+		vi.stubGlobal("window", {location: {assign, href: "https://app.example/"}});
+		const session = open();
+		await ready();
+		await session.openMaintenance();
+		await flush();
+		expect(assign).toHaveBeenCalledTimes(1);
+		expect(cube.connection.status).toBe("unavailable");
+		cube.close();
+		expect(urls()).toEqual([]);
 	});
 });
 
