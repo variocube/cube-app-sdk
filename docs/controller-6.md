@@ -89,10 +89,28 @@ pass without its next chunk.
 
 `session.openMaintenance()` navigates normally to the trusted controller's `/maintenance?returnUrl=...`, carrying only
 the clean current app URL. It requests no maintenance context and passes no credential in that URL. Technician login
-belongs to the maintenance UI. When a page has no bootstrap envelope, `bootstrapSession()` makes at most one bounded
-`POST /app/relaunch` request per page, then reports authentication required while waiting for the trusted kiosk to reload
-a fresh launch. The controller authorizes that unauthenticated retry only for an actual loopback peer and the configured
-app Origin. The response cannot issue a grant to this helper, choose navigation or trigger automatic retries.
+belongs to the maintenance UI.
+
+The controller relaunches the kiosk on a relaunch request or a configuration/kiosk change, not when an app credential
+expires. Whenever the SDK concludes that a fresh kiosk launch is required, it makes at most one bounded
+`POST /app/relaunch` request per page, across all of these paths, then reports `AUTHENTICATION_REQUIRED` while waiting
+for the trusted kiosk to reload a fresh launch (#87):
+
+- `bootstrapSession()` finds no envelope, an invalid envelope, or the controller rejects the grant (consumed or expired).
+  A grant exchange that failed in transport or timed out may have consumed the grant, so it asks as well and rejects
+  with `DISCONNECTED`. Each rejects after the request has completed or timed out (10 seconds). An invalid controller
+  response rejects with `INVALID_RESPONSE` and does not ask, since a fresh launch would meet the same mismatch.
+- Renewal fails: the session closes, its connections become `unavailable`, and the request is sent without waiting.
+- The controller rejects the `/app` socket credential with `UNAUTHORIZED`. The connection reports `error`, and the SDK
+  renews the credential to tell a credential a concurrent renewal replaced from a session the controller dropped: the
+  former reconnects as usual, the latter fails renewal as above.
+- The installed app or its generation changed. The controller relaunches the kiosk itself on app changes, so the
+  request is redundant there but harmless: the controller refuses it once the change has cleared the current launch,
+  and folds it into the same pending relaunch before that. It is kept so no authentication failure can strand a page.
+
+`session.close()`, `openMaintenance()` and page unload are deliberate ends and never ask. The controller authorizes the
+request, which carries no credential, only for an actual loopback peer and the configured app Origin. The response
+cannot issue a grant to this helper, choose navigation or trigger automatic retries.
 
 ## Validation and remaining evidence
 

@@ -19,6 +19,14 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+/** The relaunch request is limited per page, so each test that counts it loads a fresh SDK, as a new page would. */
+async function page() {
+	vi.resetModules();
+	return import("../src/session.js");
+}
+const urls = (transport: { mock: { calls: Array<[RequestInfo | URL, ...unknown[]]> } }) =>
+	transport.mock.calls.map(([input]) => String(input));
+
 function envelope(original: string): string {
 	const url = new URL(original);
 	url.hash = "vc-bootstrap=" + encodeURIComponent(JSON.stringify({grant: secret, fragment: url.hash}));
@@ -66,32 +74,73 @@ describe("early bootstrap cleanup", () => {
 		},
 	);
 
-	it("cleans malformed envelopes and never reflects or persists the grant", async () => {
+	it("cleans malformed envelopes, asks once for a fresh launch and never reflects or persists the grant", async () => {
+		const {bootstrapSession: bootstrap} = await page();
 		const replaceState = vi.fn();
-		const transport = vi.fn<typeof fetch>();
-		await expect(
-			bootstrapSession({
-				location: {href: "https://app.example/#vc-bootstrap=%invalid-secret"},
-				history: {state: null, replaceState},
-				fetch: transport,
-			}),
-		)
-			.rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		const transport = vi.fn<typeof fetch>(async () => new Response(null, {status: 202}));
+		const options = {
+			location: {href: "https://app.example/#vc-bootstrap=%invalid-secret"},
+			history: {state: null, replaceState},
+			fetch: transport,
+		};
+		await expect(bootstrap(options)).rejects.toMatchObject({
+			code: "AUTHENTICATION_REQUIRED",
+			message: "Invalid kiosk launch envelope.",
+		});
 		expect(replaceState).toHaveBeenCalledWith(null, "", "https://app.example/");
-		expect(transport).not.toHaveBeenCalled();
+		expect(urls(transport)).toEqual(["http://localhost:9000/app/relaunch"]);
+		expect(JSON.stringify(transport.mock.calls)).not.toContain("invalid-secret");
 	});
 
-	it("consumed links never fall back to a persistent or anonymous credential", async () => {
-		const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response("private diagnostics", {status: 401}));
+	it("consumed links never fall back to a persistent or anonymous credential; they ask once for a fresh launch", async () => {
+		const {bootstrapSession: bootstrap} = await page();
+		const transport = vi.fn<typeof fetch>(async input =>
+			String(input).endsWith("/app/bootstrap")
+				? new Response("private diagnostics", {status: 401})
+				: new Response(null, {status: 202})
+		);
+		const options = {
+			location: {href: envelope("https://app.example/")},
+			history: {state: null, replaceState: vi.fn()},
+			fetch: transport,
+		};
+		await expect(bootstrap(options)).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		expect(urls(transport)).toEqual(["http://localhost:9000/app/bootstrap", "http://localhost:9000/app/relaunch"]);
+		expect(String(transport.mock.calls[1][1]?.body)).toBe("{}");
+		expect(new Headers(transport.mock.calls[1][1]?.headers).has("Authorization")).toBe(false);
+	});
+
+	it("reports a non-JSON grant exchange answer as invalid without asking for a fresh launch", async () => {
+		const {bootstrapSession: bootstrap} = await page();
+		const transport = vi.fn<typeof fetch>(async input =>
+			String(input).endsWith("/app/bootstrap")
+				? new Response("<html>proxy</html>", {status: 200})
+				: new Response(null, {status: 202})
+		);
 		await expect(
-			bootstrapSession({
+			bootstrap({
 				location: {href: envelope("https://app.example/")},
 				history: {state: null, replaceState: vi.fn()},
 				fetch: transport,
 			}),
-		)
-			.rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
-		expect(transport).toHaveBeenCalledTimes(1);
+		).rejects.toMatchObject({code: "INVALID_RESPONSE"});
+		expect(urls(transport)).toEqual(["http://localhost:9000/app/bootstrap"]);
+	});
+
+	it("asks once for a fresh launch when the grant exchange fails in transport, as it may have consumed the grant", async () => {
+		const {bootstrapSession: bootstrap} = await page();
+		const transport = vi.fn<typeof fetch>(async input => {
+			if (String(input).endsWith("/app/bootstrap")) throw new TypeError("connection refused");
+			return new Response(null, {status: 202});
+		});
+		await expect(
+			bootstrap({
+				location: {href: envelope("https://app.example/")},
+				history: {state: null, replaceState: vi.fn()},
+				fetch: transport,
+			}),
+		).rejects.toMatchObject({code: "DISCONNECTED"});
+		expect(urls(transport)).toEqual(["http://localhost:9000/app/bootstrap", "http://localhost:9000/app/relaunch"]);
 	});
 });
 
@@ -143,6 +192,54 @@ describe("memory-only renewal", () => {
 			await expect(session.getCredential()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
 			expect(invalidated).toHaveBeenCalledTimes(1);
 		}
+	});
+
+	it("asks once per page for a fresh launch when renewal fails, without waiting for the answer", async () => {
+		const {ControllerSessionImpl: Session} = await page();
+		// The relaunch answer never arrives; the renewal failure and its invalidation must not wait for it.
+		const transport = vi.fn<typeof fetch>(async input =>
+			String(input).endsWith("/app/renew")
+				? new Response("secret", {status: 401})
+				: new Promise<Response>(() => {})
+		);
+		const open = () => {
+			const session = new Session("http://localhost:9000", transport, {
+				credential,
+				expiresAt: Math.floor(Date.now() / 1000) + 600,
+				generation: 1,
+			});
+			sessions.push(session);
+			return session;
+		};
+		const first = open();
+		const invalidated = vi.fn();
+		first.onInvalidation(invalidated);
+		await expect(first.renew()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		expect(invalidated).toHaveBeenCalledTimes(1);
+		expect(urls(transport)).toEqual(["http://localhost:9000/app/renew", "http://localhost:9000/app/relaunch"]);
+		expect(new Headers(transport.mock.calls[1][1]?.headers).has("Authorization")).toBe(false);
+		await expect(open().renew()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		expect(urls(transport)).toEqual([
+			"http://localhost:9000/app/renew",
+			"http://localhost:9000/app/relaunch",
+			"http://localhost:9000/app/renew",
+		]);
+	});
+
+	it("does not ask for a fresh launch when the app closes the session, even during renewal", async () => {
+		const {ControllerSessionImpl: Session} = await page();
+		const transport = vi.fn<typeof fetch>(async () => response());
+		const session = new Session("http://localhost:9000", transport, {
+			credential,
+			expiresAt: Math.floor(Date.now() / 1000) + 600,
+			generation: 1,
+		});
+		const renewal = session.renew();
+		session.close();
+		await expect(renewal).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		session.requestFreshLaunch();
+		await expect(session.renew()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+		expect(urls(transport)).toEqual(["http://localhost:9000/app/renew"]);
 	});
 
 	it("does not release an in-memory credential across a concurrent close", async () => {

@@ -109,6 +109,7 @@ export class CubeImpl implements Cube {
 		occupancyEnded: [],
 	};
 	readonly #client: VcmpClient;
+	readonly #session: ControllerSessionImpl;
 	/** The terminal's side from the latest authentication: primary before the first, kept while reconnecting. */
 	#secondary = false;
 	readonly #unsubscribeSession: () => void;
@@ -140,6 +141,7 @@ export class CubeImpl implements Cube {
 	readonly storage: CubeStorage;
 
 	constructor(options: CubeImplOptions) {
+		this.#session = options.session;
 		this.occupancies = {
 			occupyType: ({features, ...request}) => {
 				const flags = Object.fromEntries((features ?? []).map(feature => [FEATURE_FLAGS[feature], true]));
@@ -236,7 +238,12 @@ export class CubeImpl implements Cube {
 				// A socket that is already closing gets its reconnect from the close handler, which
 				// may not have run yet. Failing here would promote an ordinary disconnect to an error.
 				if (generation !== this.#generation || !this.#socketOpen) return;
-				this.#fail(toCubeError(error));
+				const failure = toCubeError(error);
+				this.#fail(failure);
+				// The controller rejects a credential it no longer knows with UNAUTHORIZED, also one a concurrent
+				// renewal just replaced. Renewal tells them apart: it fails, closes the session and makes this
+				// connection unavailable only when the controller has dropped the session itself.
+				if (failure.code === "UNAUTHORIZED") void options.session.renew().catch(() => {});
 			}).catch(error => this.#fail(toCubeError(error)));
 		};
 		this.#client.onClose = this.#handleClose;
@@ -481,6 +488,9 @@ export class CubeImpl implements Cube {
 		this.#client.stop();
 		this.#controllerConnected = false;
 		if (FATAL_FAILURES.has(error.code)) {
+			// The controller does not relaunch the kiosk when it rejects a credential, so ask before listeners run. A
+			// closed session does not ask: the app ended it, or the renewal failure that closed it has asked already.
+			if (error.code === "AUTHENTICATION_REQUIRED") this.#session.requestFreshLaunch();
 			this.#reset({status: error.code === "AUTHENTICATION_REQUIRED" ? "unavailable" : "error", error});
 			return;
 		}

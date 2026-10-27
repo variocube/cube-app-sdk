@@ -3,6 +3,7 @@ import {credentialSchema} from "./schema.js";
 
 export const PROTOCOL_MAJOR = 6;
 const ENVELOPE = "#vc-bootstrap=";
+const DEFAULT_ENDPOINT = "http://localhost:9000";
 const REQUEST_TIMEOUT = 10000;
 let relaunchRequested = false;
 
@@ -30,7 +31,7 @@ export function bootstrapSession(options: BootstrapOptions = {}): Promise<Contro
 	const history = options.history ?? window.history;
 	const url = new URL(location.href);
 	if (!url.hash.startsWith(ENVELOPE)) {
-		return requestFreshLaunch(options);
+		return failBootstrap(options, authenticationRequired());
 	}
 	const encoded = url.hash.slice(ENVELOPE.length);
 	// Remove the credential even when parsing fails. Never include input in errors.
@@ -49,13 +50,20 @@ export function bootstrapSession(options: BootstrapOptions = {}): Promise<Contro
 	}
 	catch {
 		history.replaceState(history.state, "", url.href);
-		return Promise.reject(new CubeError("AUTHENTICATION_REQUIRED", "Invalid kiosk launch envelope."));
+		return failBootstrap(options, new CubeError("AUTHENTICATION_REQUIRED", "Invalid kiosk launch envelope."));
 	}
 	history.replaceState(history.state, "", url.href);
-	const endpoint = trustedEndpoint(options.endpoint ?? "http://localhost:9000");
+	const endpoint = trustedEndpoint(options.endpoint ?? DEFAULT_ENDPOINT);
 	const transport = options.fetch ?? globalThis.fetch.bind(globalThis);
-	return requestCredential({endpoint, transport, path: "/app/bootstrap", grant})
-		.then(credential => new ControllerSessionImpl(endpoint, transport, credential));
+	return requestCredential({endpoint, transport, path: "/app/bootstrap", grant}).then(
+		credential => new ControllerSessionImpl(endpoint, transport, credential),
+		// The envelope is gone, so neither a rejected grant nor an exchange that may have consumed it can be retried. An
+		// invalid response is not asked about: a fresh launch would meet the same mismatch again.
+		(error: CubeError) =>
+			["AUTHENTICATION_REQUIRED", "DISCONNECTED"].includes(error.code)
+				? failBootstrap(options, error)
+				: Promise.reject(error),
+	);
 }
 
 /**
@@ -118,7 +126,8 @@ export class ControllerSessionImpl implements ControllerSession {
 				this.#scheduleRenewal();
 				return next.credential;
 			}).catch(() => {
-				// No persistent credential or anonymous issuance fallback. Kiosk observes the expired launch.
+				// No persistent credential or anonymous issuance fallback. The kiosk does not relaunch on expiry.
+				this.requestFreshLaunch();
 				this.close();
 				throw authenticationRequired();
 			}).finally(() => {
@@ -160,6 +169,14 @@ export class ControllerSessionImpl implements ControllerSession {
 		target.searchParams.set("returnUrl", current.href);
 		window.location.assign(target.href);
 		this.close();
+	}
+
+	/**
+	 * Asks the kiosk for a fresh launch without waiting for it. A closed session never asks: either the app ended it
+	 * deliberately, or the renewal failure that closed it has already asked.
+	 */
+	requestFreshLaunch(): void {
+		if (!this.#closed) void requestFreshLaunch(this.endpoint, this.transport);
 	}
 
 	onInvalidation(listener: () => void): () => void {
@@ -214,6 +231,10 @@ async function requestCredential(options: CredentialRequest): Promise<Credential
 	}
 	catch (error) {
 		if (error instanceof CubeError) throw error;
+		// The controller answered, but not with JSON. An aborted or failed body read is still a transport failure.
+		if (error instanceof SyntaxError) {
+			throw new CubeError("INVALID_RESPONSE", "Invalid controller API credential response.");
+		}
 		throw new CubeError("DISCONNECTED", "The controller credential exchange could not complete.");
 	}
 	finally {
@@ -251,12 +272,20 @@ function authenticationRequired(): CubeError {
 	);
 }
 
-/** One attempt per page, only the configured controller can ask its local kiosk to create the replacement URL. */
-async function requestFreshLaunch(options: BootstrapOptions): Promise<ControllerSession> {
-	if (relaunchRequested) throw authenticationRequired();
+/** Rejects with `error` once the page's fresh-launch request has completed or timed out. */
+async function failBootstrap(options: BootstrapOptions, error: CubeError): Promise<never> {
+	const endpoint = trustedEndpoint(options.endpoint ?? DEFAULT_ENDPOINT);
+	await requestFreshLaunch(endpoint, options.fetch ?? globalThis.fetch.bind(globalThis));
+	throw error;
+}
+
+/**
+ * One attempt per page, whichever path concluded that a fresh launch is required: only the configured controller can
+ * ask its local kiosk to create the replacement URL. Never rejects.
+ */
+async function requestFreshLaunch(endpoint: string, transport: typeof fetch): Promise<void> {
+	if (relaunchRequested) return;
 	relaunchRequested = true;
-	const endpoint = trustedEndpoint(options.endpoint ?? "http://localhost:9000");
-	const transport = options.fetch ?? globalThis.fetch.bind(globalThis);
 	const abort = new AbortController();
 	const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT);
 	try {
@@ -278,5 +307,4 @@ async function requestFreshLaunch(options: BootstrapOptions): Promise<Controller
 	finally {
 		clearTimeout(timer);
 	}
-	throw authenticationRequired();
 }

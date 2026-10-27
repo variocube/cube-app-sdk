@@ -40,6 +40,7 @@ for (const route of ["/?x=1&x=%26#/deep?a=%23", "/?q=%E2%98%83#fragment", "/#vc-
 		await page.reload();
 		await expect(page.locator("#status")).toHaveText("fresh launch required");
 		expect(exchanges).toBe(1);
-		expect(relaunches).toBe(original.hash.startsWith("#vc-bootstrap=") ? 0 : 1);
+		// The reload has no envelope, or for the last route one that is no longer valid. Either way it asks once (#87).
+		expect(relaunches).toBe(1);
 	});
 }

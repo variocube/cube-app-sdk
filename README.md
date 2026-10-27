@@ -34,6 +34,12 @@ an authoritative initial snapshot arrives. `cube.connection` / `useConnectionSta
 `initializing`, `ready`, `unavailable` (a fresh kiosk launch is required), and `error`. This is the only readiness model:
 `cube.connected`, the `open`/`close` events, local reads and every React hook follow it.
 
+The controller does not relaunch the kiosk when an app credential expires or is rejected. So whenever the SDK concludes
+that a fresh launch is required — no or an invalid launch envelope, a rejected or expired grant, a failed renewal, a
+socket credential the controller no longer accepts, or a changed installed app — it asks the controller once per page for
+one (`POST /app/relaunch`, bounded to 10 seconds, without credential) and reports `AUTHENTICATION_REQUIRED`. Closing the
+session, `openMaintenance()` and leaving the page are deliberate ends and ask for nothing (#87).
+
 `error` is not terminal. A failure a reconnect can resolve — a timed-out or malformed snapshot, a controller domain that
 dropped away — holds the reason on `connection.error` and rebuilds the connection from a fresh socket ten seconds later,
 so one bad moment does not strand the app until the kiosk relaunches it. Only `AUTHENTICATION_REQUIRED` (`unavailable`)
@@ -43,8 +49,8 @@ omitted from that compartment or device, and an unknown lock status or code sour
 
 Local API credentials renew 30 seconds before expiry. Backend app JWTs come from `cube.getToken()` and have the exact
 installed app audience. They are separate from local API credentials, Center identity proofs and technician sessions.
-Never persist or log credentials or business state. Reload loses memory credentials; kiosk's trusted launch monitor
-obtains a fresh launch when the old session is lost. A consumed URL cannot authenticate again.
+Never persist or log credentials or business state. Reload loses memory credentials; the reloaded page asks the
+controller for a fresh launch as described above. A consumed URL cannot authenticate again.
 
 ## Domain APIs
 
