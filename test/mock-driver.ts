@@ -41,6 +41,8 @@ export class MockDriver {
 						"@type": "device:DeviceAdded",
 						id: this.id,
 						types: [this.device.type],
+						vendor: "Variocube",
+						model: `Test ${this.device.type}`,
 						info: null,
 					})
 						.then(() => resolve(), reject);
