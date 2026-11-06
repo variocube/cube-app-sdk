@@ -102,6 +102,26 @@ result: `await cube.getToken()` immediately before each backend request is the o
 current pushed JWT and rejects a wrong or expired audience without exposing a Center token. The controller pushes token
 rotations; they are not identity changes.
 
+## Logging
+
+On a locker, the kiosk ([variocube/kiosk](https://github.com/variocube/kiosk)) forwards the app page's browser console
+output (`console.log`, `console.info`, `console.warn`, `console.error`) to the device's systemd journal. Operators read it
+there for diagnostics, and log-analysis jobs may pick it up, so `console` is the normal way for a cube app to log; no
+special logger is needed.
+
+`console.debug` is dropped by default. An operator can enable it on a device with `LOG_CONSOLE_DEBUG=true` in
+`/etc/default/variocube-kiosk`, so use it for chatty development output. The setting applies to the Cog-based kiosk. The
+legacy Chromium-based kiosk always forwards `console.debug`, so don't rely on it being dropped. Keep `console.debug`
+messages on a single line: the kiosk recognizes one by its first line only, so continuation lines (such as
+`JSON.stringify(x, null, 2)` output or `err.stack`) are forwarded even when debug is off.
+
+- Never log secrets: access tokens, API credentials, bootstrap grants, PINs or codes for opening compartments, or
+  personal data beyond what diagnosis needs. Log identifiers instead of the object, and never dump whole
+  request/response objects or headers. Whatever is logged ends up in plain text on the device and in log collections.
+- Keep the volume low. Devices often run on SD cards or eMMC, and the journal shares their limited space and write
+  endurance. Don't log in loops, timers or polling paths at info level or above; log state changes and errors, not every
+  poll.
+
 ## Upgrading from SDK 1
 
 - Bootstrap a session before application startup and pass it to `connect({session})` / `<CubeProvider session>`.
