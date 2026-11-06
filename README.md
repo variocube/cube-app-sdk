@@ -111,7 +111,9 @@ special logger is needed.
 
 `console.debug` is dropped by default. An operator can enable it on a device with `LOG_CONSOLE_DEBUG=true` in
 `/etc/default/variocube-kiosk`, so use it for chatty development output. The setting applies to the Cog-based kiosk. The
-legacy Chromium-based kiosk always forwards `console.debug`, so don't rely on it being dropped.
+legacy Chromium-based kiosk always forwards `console.debug`, so don't rely on it being dropped. Keep `console.debug`
+messages on a single line: the kiosk recognizes one by its first line only, so continuation lines (such as
+`JSON.stringify(x, null, 2)` output or `err.stack`) are forwarded even when debug is off.
 
 - Never log secrets: access tokens, API credentials, bootstrap grants, PINs or codes for opening compartments, or
   personal data beyond what diagnosis needs. Log identifiers instead of the object, and never dump whole
