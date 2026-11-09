@@ -78,6 +78,48 @@ the side the controller reported when the connection authenticated (`false` befo
 lock. Both take an optional `{actor, action}` context; the controller records it on the opening and on the resulting
 `lock` event, whose `actor` is the app's own attribution when the context names none.
 
+### Close only after opening
+
+A controller can be set to accept a close of a lock only within a time after an open of that lock; any other close is
+opened again. `cube.preventCloseAfterOpenSeconds` / `usePreventCloseAfterOpenSeconds()` is that time in seconds while
+the rule is on, and `undefined` while it is off, before the initial state of a connection, and on a controller that
+does not report the setting. Use it for the prompt, for example "close the door within 120 seconds, otherwise it opens
+again". Every open command for the lock starts the time, whoever sends it, and opening an already open lock starts it
+anew; the SDK has no call to arm a close. The controller's own reopen does not start the time. A changed setting
+arrives only with the next connection.
+
+The controller tags the `lock` events it causes itself with actor `LOCK_EVENT_ACTOR_CONTROLLER` (`"controller"`) and
+action `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`) or `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`).
+`isReopenedLockEvent(event)` and `isAllowedCloseLockEvent(event)` test for the two tags; they compare actor and action
+only, not the status:
+
+| Helper                    | Action        | Status             | Meaning                                                           |
+| ------------------------- | ------------- | ------------------ | ----------------------------------------------------------------- |
+| `isReopenedLockEvent`     | `reopen`      | `OPEN` / `BLOCKED` | The controller opened the lock again by itself. Nobody opened it. |
+| `isAllowedCloseLockEvent` | `allow close` | `CLOSED`           | The close was kept because an open shortly before allowed it.     |
+
+```typescript
+import {isAllowedCloseLockEvent, isReopenedLockEvent} from "@variocube/cube-app-sdk";
+
+cube.addEventListener("lock", event => {
+	if (isReopenedLockEvent(event)) return offerOpenAgain();
+	if (event.status === "OPEN") recordOpening(event.actor, event.action);
+	if (event.status === "CLOSED" && isAllowedCloseLockEvent(event)) finishHandover();
+});
+```
+
+For a reopen, write no audit entry, count no opening and send no notification. A reopen does not allow a close: the
+door is open, but closing it now is refused again, because only an open command starts the time. Show a hint that the
+locker opened again, with opening as its action, and send `openCompartment` or `openLock` when the user takes it (this
+also works on the already open lock); the door can then be closed within the time. Do not ask the user to just close
+the door after a reopen.
+
+The same tag marks a reopen by the controller's rule for compartments that are not occupied. A `CLOSED` without the
+allow tag is not necessarily refused: it can still carry the actor and action of an app's open shortly before, and the
+controller keeps some closes untagged (a compartment that is disabled or in maintenance, or one it stopped reopening
+after repeated closes). `actor` and `action` stay plain strings, so other values keep arriving unchanged. A controller
+older than the rule sends neither the setting nor the allow tag.
+
 `occupancies.list(access?)` and `occupancies.get(uuid)` are synchronous reads of the latest pushed snapshot; `get`
 returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown
 snapshot is never mistaken for an empty one. A local read can trail a just-acknowledged mutation until its publication

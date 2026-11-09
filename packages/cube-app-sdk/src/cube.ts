@@ -130,6 +130,7 @@ export class CubeImpl implements Cube {
 	#retryTimer: ReturnType<typeof setTimeout> | undefined;
 	#compartments: Compartment[] = [];
 	#devices: Device[] = [];
+	#preventCloseAfterOpenSeconds: number | undefined;
 	#identity: CubeIdentity | undefined;
 	#token: { token: string; expiresAt: number } | undefined;
 	#controllerConnected: boolean | undefined;
@@ -281,6 +282,7 @@ export class CubeImpl implements Cube {
 			this.#token = token && expiresAt ? {token, expiresAt} : undefined;
 			this.#compartments = event.compartments;
 			this.#devices = event.devices;
+			this.#preventCloseAfterOpenSeconds = event.preventCloseAfterOpenSeconds;
 			// A same-generation resnapshot replaces the storage, so reads wait for the next ready barrier.
 			const wasReady = this.connected;
 			this.#connection = {status: "initializing"};
@@ -466,6 +468,7 @@ export class CubeImpl implements Cube {
 		this.#token = undefined;
 		this.#compartments = [];
 		this.#devices = [];
+		this.#preventCloseAfterOpenSeconds = undefined;
 		this.#dispatchEvent("compartments", {compartments: []});
 		this.#dispatchEvent("devices", {devices: []});
 		if (this.#occupancies) this.#setOccupancies(undefined);
@@ -798,6 +801,9 @@ export class CubeImpl implements Cube {
 	}
 	get devices() {
 		return [...this.#devices];
+	}
+	get preventCloseAfterOpenSeconds() {
+		return this.#preventCloseAfterOpenSeconds;
 	}
 	get secondary() {
 		return this.#secondary;

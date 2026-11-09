@@ -4,9 +4,16 @@ import fixture from "../../../test/fixtures/controller-wire.json";
 import type {ConnectOptions} from "../src/connect.js";
 import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
+import {
+	isAllowedCloseLockEvent,
+	isReopenedLockEvent,
+	LOCK_EVENT_ACTION_ALLOW_CLOSE,
+	LOCK_EVENT_ACTION_REOPEN,
+	LOCK_EVENT_ACTOR_CONTROLLER,
+} from "../src/lock-tags.js";
 import type {CubeMessageIdentity, StorageItem} from "../src/messages.js";
 import {ControllerSessionImpl as ControllerSession} from "../src/session.js";
-import type {Occupancy, OpenContext} from "../src/types.js";
+import type {Cube, LockEvent, Occupancy, OpenContext} from "../src/types.js";
 
 class Socket {
 	static instances: Socket[] = [];
@@ -103,7 +110,8 @@ async function authenticate(protocolMajor = 6, side: { secondary?: unknown } = {
 	await flush();
 }
 
-function initial(data: Occupancy[] = [], revision = 0) {
+/** `extra` adds keys beyond the mandatory snapshot, such as `preventCloseAfterOpenSeconds`. */
+function initial(data: Occupancy[] = [], revision = 0, extra: Record<string, unknown> = {}) {
 	socket.event({
 		"@type": "initialState",
 		revision,
@@ -112,6 +120,7 @@ function initial(data: Occupancy[] = [], revision = 0) {
 		compartments: [],
 		devices: [],
 		occupancies: data,
+		...extra,
 	});
 	socket.revision = revision;
 }
@@ -1222,5 +1231,156 @@ describe("idempotent occupancy contract", () => {
 			code: "LIMIT_EXCEEDED",
 		});
 		expect(socket.requests()).toEqual([]);
+	});
+});
+
+describe("close only after opening", () => {
+	async function readyWith(extra: Record<string, unknown>) {
+		await authenticate();
+		initial([], 0, extra);
+		socket.event({"@type": "ready"});
+		await flush();
+	}
+
+	it("exposes the time from the initial state, replaces it on a resnapshot and clears it on disconnect", async () => {
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+		await authenticate();
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+		initial([], 0, {preventCloseAfterOpenSeconds: 120});
+		socket.event({"@type": "ready"});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.preventCloseAfterOpenSeconds).toBe(120);
+		// A same-generation resnapshot is authoritative for the setting as well.
+		initial([], socket.revision + 1, {preventCloseAfterOpenSeconds: null});
+		socket.event({"@type": "ready"});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+		initial([], socket.revision + 1, {preventCloseAfterOpenSeconds: 30});
+		socket.event({"@type": "ready"});
+		await flush();
+		expect(cube.preventCloseAfterOpenSeconds).toBe(30);
+		socket.close();
+		expect(cube.connection.status).toBe("disconnected");
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+	});
+
+	it("reads a rule that is off as undefined", async () => {
+		await readyWith({preventCloseAfterOpenSeconds: null});
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+	});
+
+	it("connects to a controller that does not send the setting and treats the rule as off", async () => {
+		await readyWith({});
+		expect(cube.connection.status).toBe("ready");
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+	});
+
+	it.each([0, -30, 1.5, "120", true, {seconds: 120}, Number.MAX_SAFE_INTEGER + 1])(
+		"treats the unusable value %j as off instead of failing the connection",
+		async value => {
+			await readyWith({preventCloseAfterOpenSeconds: value});
+			expect(cube.connection).toEqual({status: "ready"});
+			expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+		},
+	);
+
+	it("never replaces the setting by a second snapshot before ready: that fails the connection", async () => {
+		const events: string[] = [];
+		await authenticate();
+		initial([], 0, {preventCloseAfterOpenSeconds: 120});
+		await flush();
+		expect(cube.preventCloseAfterOpenSeconds).toBe(120);
+		cube.addEventListener("identity", () => events.push("identity"));
+		cube.addEventListener("connection", ({connection}) => events.push(connection.status));
+		initial([], 1, {preventCloseAfterOpenSeconds: 45});
+		await flush();
+		expect(cube.connection).toMatchObject({status: "error", error: {code: "INVALID_RESPONSE"}});
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+		// Both events the React hook listens to announce the reset, so it cannot keep showing 120.
+		expect(events).toEqual(["identity", "error"]);
+	});
+
+	it("clears the setting when the connection fails", async () => {
+		await readyWith({preventCloseAfterOpenSeconds: 120});
+		socket.event({"@type": "availability", connected: false});
+		await flush();
+		expect(cube.connection.status).toBe("error");
+		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
+	});
+
+	it("delivers the controller's reopen and allowed-close tags and keeps unknown tags flowing", async () => {
+		const locks = vi.fn();
+		cube.addEventListener("lock", locks);
+		await readyWith({preventCloseAfterOpenSeconds: 120});
+		socket.event({"@type": "lock", lock: "lock-1", compartmentNumber: "1", status: "CLOSED"});
+		socket.event({
+			"@type": "lock",
+			lock: "lock-1",
+			compartmentNumber: "1",
+			status: "OPEN",
+			actor: "controller",
+			action: "reopen",
+		});
+		socket.event({"@type": "lock", lock: "lock-1", status: "BLOCKED", actor: "controller", action: "reopen"});
+		socket.event({"@type": "lock", lock: "lock-1", status: "CLOSED", actor: "controller", action: "allow close"});
+		socket.event({"@type": "lock", lock: "lock-1", status: "OPEN", actor: "controller", action: "newer tag"});
+		await flush();
+		expect(cube.connection.status).toBe("ready");
+		expect(locks.mock.calls.map(([event]) => [event.status, event.actor, event.action])).toEqual([
+			["CLOSED", undefined, undefined],
+			["OPEN", LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_REOPEN],
+			["BLOCKED", LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_REOPEN],
+			["CLOSED", LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_ALLOW_CLOSE],
+			["OPEN", LOCK_EVENT_ACTOR_CONTROLLER, "newer tag"],
+		]);
+		expect(locks.mock.calls[1][0]).toMatchObject({lock: "lock-1", compartmentNumber: "1"});
+	});
+
+	it("exports the tags with the controller's exact wire values", () => {
+		expect([LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_REOPEN, LOCK_EVENT_ACTION_ALLOW_CLOSE]).toEqual([
+			"controller",
+			"reopen",
+			"allow close",
+		]);
+	});
+
+	it("recognizes the controller's tags by actor and action together, whatever the status", () => {
+		const reopened = {actor: "controller", action: "reopen"};
+		const allowed = {actor: "controller", action: "allow close"};
+		expect(isReopenedLockEvent(reopened)).toBe(true);
+		expect(isAllowedCloseLockEvent(allowed)).toBe(true);
+		expect(isReopenedLockEvent(allowed)).toBe(false);
+		expect(isAllowedCloseLockEvent(reopened)).toBe(false);
+		// The status is not part of the tag.
+		expect(isReopenedLockEvent({lock: "lock-1", status: "BLOCKED", ...reopened} as LockEvent)).toBe(true);
+		expect(isAllowedCloseLockEvent({lock: "lock-1", status: "CLOSED", ...allowed} as LockEvent)).toBe(true);
+		for (
+			const other of [
+				{},
+				{actor: "controller"},
+				{action: "reopen"},
+				{action: "allow close"},
+				// An app is free to name its own action like the controller's.
+				{actor: "customer", action: "reopen"},
+				{actor: "customer", action: "allow close"},
+				{actor: "app:app-a@terminal", action: "reopen"},
+				{actor: "controller", action: "newer tag"},
+				{actor: "controller", action: "allow-close"},
+				{actor: "Controller", action: "reopen"},
+			]
+		) {
+			expect(isReopenedLockEvent(other)).toBe(false);
+			expect(isAllowedCloseLockEvent(other)).toBe(false);
+		}
+		expectTypeOf(isReopenedLockEvent).returns.toEqualTypeOf<boolean>();
+		expectTypeOf(isAllowedCloseLockEvent).returns.toEqualTypeOf<boolean>();
+		expectTypeOf(isReopenedLockEvent).parameter(0).toEqualTypeOf<Pick<LockEvent, "actor" | "action">>();
+	});
+
+	it("types the setting as seconds or undefined", () => {
+		expectTypeOf<Cube["preventCloseAfterOpenSeconds"]>().toEqualTypeOf<number | undefined>();
 	});
 });

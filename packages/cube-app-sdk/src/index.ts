@@ -28,5 +28,12 @@ export type {
 	ValidationResult,
 } from "@variocube/driver-common/barcode-reader/config";
 
+export {
+	isAllowedCloseLockEvent,
+	isReopenedLockEvent,
+	LOCK_EVENT_ACTION_ALLOW_CLOSE,
+	LOCK_EVENT_ACTION_REOPEN,
+	LOCK_EVENT_ACTOR_CONTROLLER,
+} from "./lock-tags.js";
 export { bootstrapSession, PROTOCOL_MAJOR } from "./session.js";
 export type { BootstrapOptions, ControllerSession } from "./session.js";

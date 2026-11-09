@@ -36,11 +36,26 @@ export interface LockEvent {
 	/**
 	 * The actor of the open command leading to this lock event: the `OpenContext.actor` the app passed, or the
 	 * controller's own attribution (such as `app:<id>@<terminal>`) when it passed none.
+	 *
+	 * `LOCK_EVENT_ACTOR_CONTROLLER` (`"controller"`) marks an event the controller caused itself; `action` then tells
+	 * what it did. Other values, including ones a newer controller adds, are passed through unchanged.
 	 */
 	actor?: string;
 
 	/**
 	 * The action that was passed in the open command leading to this lock event (`OpenContext.action`).
+	 *
+	 * With actor `LOCK_EVENT_ACTOR_CONTROLLER` it is one of the controller's own tags, which
+	 * `isReopenedLockEvent` and `isAllowedCloseLockEvent` test for:
+	 * - `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), on status `OPEN` or `BLOCKED`: the controller opened the lock again by
+	 *   itself after a close it does not accept. Nobody opened the compartment, so write no audit entry, count no
+	 *   opening and send no notification for this event. It does not allow a close either; only a new open does.
+	 * - `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`), on status `CLOSED`: the close was kept because an open
+	 *   shortly before allowed it (see `Cube.preventCloseAfterOpenSeconds`).
+	 *
+	 * A `CLOSED` without the allow tag is not necessarily refused: it can still carry the actor and action of an
+	 * app's open shortly before, and the controller keeps some closes untagged, for example on a compartment that is
+	 * disabled or in maintenance.
 	 */
 	action?: string;
 }
@@ -395,6 +410,20 @@ export interface Cube {
 	/** Undefined unless the connection is ready. */
 	readonly identity: CubeIdentity | undefined;
 	readonly connection: ConnectionState;
+	/**
+	 * The time in seconds after an open within which the door may be closed, while the controller's "close only
+	 * after opening" rule is on: a lock closed later than that, or without an open before, is opened again by the
+	 * controller. Use it to tell the user to close the door within this many seconds, otherwise it opens again.
+	 *
+	 * Every open command for the lock starts the time, whoever sends it, and opening an already open lock starts it
+	 * anew; there is no separate call to arm a close. The controller's own reopen does not start it: after one, send
+	 * `openCompartment` or `openLock` again before the door can be closed. Lock events report the outcome, see
+	 * `LockEvent.action`.
+	 *
+	 * Undefined while the rule is off, before the initial state of a connection, and on a controller that does not
+	 * report the setting. A changed setting arrives only with the next connection, not while connected.
+	 */
+	readonly preventCloseAfterOpenSeconds: number | undefined;
 	/**
 	 * The current backend token for the installed app. Call it immediately before each backend request; never
 	 * keep, log or render the result. Rejects unless a valid, unexpired token has been pushed by the controller.

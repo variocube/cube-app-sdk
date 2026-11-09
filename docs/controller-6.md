@@ -37,9 +37,17 @@ rejected/disconnected authentication discards that buffer without publishing pro
   "identity": { "cubeId": "cube-1", "appId": "dev-app", "token": null, "expiresAt": null },
   "compartments": [],
   "devices": [],
-  "occupancies": []
+  "occupancies": [],
+  "preventCloseAfterOpenSeconds": 120
 }
 ```
+
+`preventCloseAfterOpenSeconds` is the effective time of the controller's "close only after opening" rule in seconds
+(an integer the controller clamps to 30–300), or `null` while the rule is off. The key is additive: a controller older
+than the rule (controller-rs#198) omits it. The SDK exposes it as `cube.preventCloseAfterOpenSeconds` and maps `null`,
+an absent key and any value that is not a positive integer to `undefined` without failing the snapshot. There is no
+separate push for it: a changed setting reaches an app with the next `initialState`, after a reconnect. It is cleared
+with the rest of the snapshot on disconnect.
 
 Subsequent events carry the same generation and a contiguous per-session publication revision, increasing once per
 event. ACK results use `{generation,revision,result}` without advancing publication revision. Revisions describe the
@@ -58,6 +66,26 @@ permanent. The SDK checks only that the compartment exists in its snapshot (`NOT
 `openLock(lock, context?)` sends `openLock` for a specific lock and is unchanged. Both carry the `OpenContext`
 attribution: the controller records the app's `actor` (at most 128 bytes) instead of its derived
 `app:<id>@<terminal>`, and `action`, on the opening and on the resulting `lock` event.
+
+While `preventCloseAfterOpenSeconds` is set, the controller reopens a close of a box's lock that does not fall within
+that time (plus 5 seconds of detection grace) after an Open command of that lock. It keeps the close, untagged, on a
+box that is disabled or in maintenance, on the third close within three seconds (it gives up reopening), and on a
+lock that belongs to no box. Every Open command arms the close, whoever sends it, and opening an already open lock
+arms it again. The controller's own reopen does not arm: after one, a close stands only once a new open command was
+sent; an app sends `openBox` or `openLock` for that. There is no arm command: the SDK sends no request for this rule
+and adds none. `lock {generation,revision,lock,status,compartmentNumber?,actor?,action?}` events carry the
+controller's own tags. The SDK passes them through as open strings and exports them as `LOCK_EVENT_ACTOR_CONTROLLER`,
+`LOCK_EVENT_ACTION_REOPEN` and `LOCK_EVENT_ACTION_ALLOW_CLOSE`, with `isReopenedLockEvent` and
+`isAllowedCloseLockEvent` to test an event's actor and action for them:
+
+| `actor`      | `action`      | `status`            | Meaning                                                               |
+| ------------ | ------------- | ------------------- | --------------------------------------------------------------------- |
+| `controller` | `reopen`      | `OPEN` or `BLOCKED` | The controller's own reopen; no opening by anyone. Never on `CLOSED`. |
+| `controller` | `allow close` | `CLOSED`            | A close kept because an open armed it.                                |
+
+`reopen` is also the tag of the older `preventCloseNonOccupiedBoxAfterSeconds` rule. Apps write no audit entry, count
+no opening and send no notification for it. A `CLOSED` that is not allowed may still carry the actor and action of an
+app's open shortly before. The closes the controller keeps without an arming open, listed above, are untagged.
 
 Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
 publication uses the contiguous per-session revision, including storage chunks and the ready barrier:
