@@ -89,22 +89,24 @@ anew; the SDK has no call to arm a close. The controller's own reopen does not s
 arrives only with the next connection.
 
 The controller tags the `lock` events it causes itself with actor `LOCK_EVENT_ACTOR_CONTROLLER` (`"controller"`) and
-action `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`) or `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`).
-`isReopenedLockEvent(event)` and `isAllowedCloseLockEvent(event)` test for the two tags; they compare actor and action
-only, not the status:
+action `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`) or
+`LOCK_EVENT_ACTION_KEEP_CLOSE` (`"keep close"`). `isReopenedLockEvent(event)`, `isAllowedCloseLockEvent(event)` and
+`isKeptCloseLockEvent(event)` test for the three tags; they compare actor and action only, not the status:
 
 | Helper                    | Action        | Status             | Meaning                                                           |
 | ------------------------- | ------------- | ------------------ | ----------------------------------------------------------------- |
 | `isReopenedLockEvent`     | `reopen`      | `OPEN` / `BLOCKED` | The controller opened the lock again by itself. Nobody opened it. |
 | `isAllowedCloseLockEvent` | `allow close` | `CLOSED`           | The close was kept because an open shortly before allowed it.     |
+| `isKeptCloseLockEvent`    | `keep close`  | `CLOSED`           | The close was kept although no open allowed it.                   |
 
 ```typescript
-import {isAllowedCloseLockEvent, isReopenedLockEvent} from "@variocube/cube-app-sdk";
+import {isAllowedCloseLockEvent, isKeptCloseLockEvent, isReopenedLockEvent} from "@variocube/cube-app-sdk";
 
 cube.addEventListener("lock", event => {
 	if (isReopenedLockEvent(event)) return offerOpenAgain();
 	if (event.status === "OPEN") recordOpening(event.actor, event.action);
 	if (event.status === "CLOSED" && isAllowedCloseLockEvent(event)) finishHandover();
+	if (event.status === "CLOSED" && isKeptCloseLockEvent(event)) showDoorStaysClosed();
 });
 ```
 
@@ -114,11 +116,25 @@ locker opened again, with opening as its action, and send `openCompartment` or `
 also works on the already open lock); the door can then be closed within the time. Do not ask the user to just close
 the door after a reopen.
 
-The same tag marks a reopen by the controller's rule for compartments that are not occupied. A `CLOSED` without the
-allow tag is not necessarily refused: it can still carry the actor and action of an app's open shortly before, and the
-controller keeps some closes untagged (a compartment that is disabled or in maintenance, or one it stopped reopening
-after repeated closes). `actor` and `action` stay plain strings, so other values keep arriving unchanged. A controller
-older than the rule sends neither the setting nor the allow tag.
+The controller keeps a close no open allowed, and tags it `keep close`, when the compartment is out of service
+(disabled or in maintenance) or when it gave up reopening on the third close of the lock within 3 seconds; the event
+does not tell which. A close an open allowed stays `allow close` in those cases too. So while the setting is on, a
+`CLOSED` of a compartment's lock tagged `allow close` or `keep close` normally stands, and one with neither tag is
+normally followed by a reopen within moments. Such an untagged `CLOSED` can still carry the actor and action of an
+app's open shortly before. A lock that belongs to no compartment keeps its close untagged.
+
+Neither half is a guarantee, so do not let a screen depend on the event that normally follows. After an untagged
+`CLOSED`, wait a short, bounded time for the reopen; if none arrives, treat the door as closed, going by the lock
+status. No reopen follows when the lock or its driver refuses it or the door does not open, when the controller
+restarts, when an open of the lock is still pending, or when the controller cannot read its configuration. A
+controller that knows the rule but not `keep close` yet (before controller-rs#217) also sends nothing more: it leaves
+the closes of a compartment out of service and the one it gave up on untagged and does not reopen them. In the other
+direction, a tagged close can still be followed by a reopen when it is reported while the reopen of an earlier close
+is already starting. [The wire contract](docs/controller-6.md) has the details.
+
+The `reopen` tag also marks a reopen by the controller's rule for compartments that are not occupied; that rule tags
+nothing else. `actor` and `action` stay plain strings, so other values keep arriving unchanged. A controller older
+than the rule sends neither the setting nor the close tags.
 
 `occupancies.list(access?)` and `occupancies.get(uuid)` are synchronous reads of the latest pushed snapshot; `get`
 returns `undefined` for an unknown UUID. Reads throw a `CubeError` unless the connection is ready, so an unknown

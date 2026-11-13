@@ -75,8 +75,10 @@ functionality; hardware simulation for development comes from the controller's o
 - `cube.preventCloseAfterOpenSeconds`: the controller's close-only-after-opening time from `initialState`, `undefined`
   when off/unknown; every open arms, the controller's own reopen does not, there is no arm call. Lock events carry
   the controller's tags (`LOCK_EVENT_ACTOR_CONTROLLER` with `LOCK_EVENT_ACTION_REOPEN` /
-  `LOCK_EVENT_ACTION_ALLOW_CLOSE`; test with `isReopenedLockEvent` / `isAllowedCloseLockEvent`); `actor`/`action`
-  stay open strings
+  `LOCK_EVENT_ACTION_ALLOW_CLOSE` / `LOCK_EVENT_ACTION_KEEP_CLOSE`; test with `isReopenedLockEvent` /
+  `isAllowedCloseLockEvent` / `isKeptCloseLockEvent`). A `CLOSED` tagged allowed or kept normally stands, an untagged
+  one of a compartment's lock is normally reopened (never wait for either without bound); `actor`/`action` stay open
+  strings
 - Events (`CubeEventMap`): hardware events plus `connection`, `identity`, `occupancies`, lifecycle events, and `storage`
 - `cube.occupancies`: controller-owned reservation/confirmation/cancellation/update/access/end lifecycle and snapshots
 - `cube.storage`: Center-write-only JSON/blob reads from full pushed values/deletions; memory caches only

@@ -6,8 +6,10 @@ import {CubeImpl} from "../src/cube.js";
 import {CubeError} from "../src/errors.js";
 import {
 	isAllowedCloseLockEvent,
+	isKeptCloseLockEvent,
 	isReopenedLockEvent,
 	LOCK_EVENT_ACTION_ALLOW_CLOSE,
+	LOCK_EVENT_ACTION_KEEP_CLOSE,
 	LOCK_EVENT_ACTION_REOPEN,
 	LOCK_EVENT_ACTOR_CONTROLLER,
 } from "../src/lock-tags.js";
@@ -1311,7 +1313,7 @@ describe("close only after opening", () => {
 		expect(cube.preventCloseAfterOpenSeconds).toBeUndefined();
 	});
 
-	it("delivers the controller's reopen and allowed-close tags and keeps unknown tags flowing", async () => {
+	it("delivers the controller's reopen, allowed-close and kept-close tags and keeps unknown tags flowing", async () => {
 		const locks = vi.fn();
 		cube.addEventListener("lock", locks);
 		await readyWith({preventCloseAfterOpenSeconds: 120});
@@ -1326,6 +1328,14 @@ describe("close only after opening", () => {
 		});
 		socket.event({"@type": "lock", lock: "lock-1", status: "BLOCKED", actor: "controller", action: "reopen"});
 		socket.event({"@type": "lock", lock: "lock-1", status: "CLOSED", actor: "controller", action: "allow close"});
+		socket.event({
+			"@type": "lock",
+			lock: "lock-2",
+			compartmentNumber: "2",
+			status: "CLOSED",
+			actor: "controller",
+			action: "keep close",
+		});
 		socket.event({"@type": "lock", lock: "lock-1", status: "OPEN", actor: "controller", action: "newer tag"});
 		await flush();
 		expect(cube.connection.status).toBe("ready");
@@ -1334,17 +1344,23 @@ describe("close only after opening", () => {
 			["OPEN", LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_REOPEN],
 			["BLOCKED", LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_REOPEN],
 			["CLOSED", LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_ALLOW_CLOSE],
+			["CLOSED", LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_KEEP_CLOSE],
 			["OPEN", LOCK_EVENT_ACTOR_CONTROLLER, "newer tag"],
 		]);
 		expect(locks.mock.calls[1][0]).toMatchObject({lock: "lock-1", compartmentNumber: "1"});
+		const kept: LockEvent = locks.mock.calls[4][0];
+		expect(kept).toMatchObject({lock: "lock-2", compartmentNumber: "2", status: "CLOSED"});
+		expect(isKeptCloseLockEvent(kept)).toBe(true);
+		expect(isAllowedCloseLockEvent(kept)).toBe(false);
 	});
 
 	it("exports the tags with the controller's exact wire values", () => {
-		expect([LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_REOPEN, LOCK_EVENT_ACTION_ALLOW_CLOSE]).toEqual([
-			"controller",
-			"reopen",
-			"allow close",
-		]);
+		expect([
+			LOCK_EVENT_ACTOR_CONTROLLER,
+			LOCK_EVENT_ACTION_REOPEN,
+			LOCK_EVENT_ACTION_ALLOW_CLOSE,
+			LOCK_EVENT_ACTION_KEEP_CLOSE,
+		]).toEqual(["controller", "reopen", "allow close", "keep close"]);
 	});
 
 	it("recognizes the controller's tags by actor and action together, whatever the status", () => {
@@ -1354,29 +1370,45 @@ describe("close only after opening", () => {
 		expect(isAllowedCloseLockEvent(allowed)).toBe(true);
 		expect(isReopenedLockEvent(allowed)).toBe(false);
 		expect(isAllowedCloseLockEvent(reopened)).toBe(false);
+		// A kept close is its own tag: allowed is not widened to it, nor the other way round.
+		const kept = {actor: "controller", action: "keep close"};
+		expect(isKeptCloseLockEvent(kept)).toBe(true);
+		expect(isAllowedCloseLockEvent(kept)).toBe(false);
+		expect(isReopenedLockEvent(kept)).toBe(false);
+		expect(isKeptCloseLockEvent(allowed)).toBe(false);
+		expect(isKeptCloseLockEvent(reopened)).toBe(false);
 		// The status is not part of the tag.
 		expect(isReopenedLockEvent({lock: "lock-1", status: "BLOCKED", ...reopened} as LockEvent)).toBe(true);
 		expect(isAllowedCloseLockEvent({lock: "lock-1", status: "CLOSED", ...allowed} as LockEvent)).toBe(true);
+		expect(isKeptCloseLockEvent({lock: "lock-1", status: "CLOSED", ...kept} as LockEvent)).toBe(true);
 		for (
 			const other of [
 				{},
 				{actor: "controller"},
 				{action: "reopen"},
 				{action: "allow close"},
+				{action: "keep close"},
 				// An app is free to name its own action like the controller's.
 				{actor: "customer", action: "reopen"},
 				{actor: "customer", action: "allow close"},
+				{actor: "customer", action: "keep close"},
 				{actor: "app:app-a@terminal", action: "reopen"},
+				{actor: "app:app-a@terminal", action: "keep close"},
 				{actor: "controller", action: "newer tag"},
 				{actor: "controller", action: "allow-close"},
+				{actor: "controller", action: "keep-close"},
+				{actor: "controller", action: "kept close"},
 				{actor: "Controller", action: "reopen"},
 			]
 		) {
 			expect(isReopenedLockEvent(other)).toBe(false);
 			expect(isAllowedCloseLockEvent(other)).toBe(false);
+			expect(isKeptCloseLockEvent(other)).toBe(false);
 		}
 		expectTypeOf(isReopenedLockEvent).returns.toEqualTypeOf<boolean>();
 		expectTypeOf(isAllowedCloseLockEvent).returns.toEqualTypeOf<boolean>();
+		expectTypeOf(isKeptCloseLockEvent).returns.toEqualTypeOf<boolean>();
+		expectTypeOf(isKeptCloseLockEvent).parameter(0).toEqualTypeOf<Pick<LockEvent, "actor" | "action">>();
 		expectTypeOf(isReopenedLockEvent).parameter(0).toEqualTypeOf<Pick<LockEvent, "actor" | "action">>();
 	});
 

@@ -9,8 +9,10 @@ import {ControllerSessionImpl} from "../../cube-app-sdk/src/session";
 import {
 	CubeProvider,
 	isAllowedCloseLockEvent,
+	isKeptCloseLockEvent,
 	isReopenedLockEvent,
 	LOCK_EVENT_ACTION_ALLOW_CLOSE,
+	LOCK_EVENT_ACTION_KEEP_CLOSE,
 	LOCK_EVENT_ACTION_REOPEN,
 	LOCK_EVENT_ACTOR_CONTROLLER,
 	useLockEvent,
@@ -182,6 +184,7 @@ it("follows the close-after-open time through the real SDK across snapshots, res
 	const onLock = (event: LockEvent) => {
 		if (isReopenedLockEvent(event)) tags.push(`${event.status} reopened`);
 		if (isAllowedCloseLockEvent(event)) tags.push(`${event.status} allowed`);
+		if (isKeptCloseLockEvent(event)) tags.push(`${event.status} kept`);
 	};
 	function Probe() {
 		const seconds = usePreventCloseAfterOpenSeconds();
@@ -225,13 +228,17 @@ it("follows the close-after-open time through the real SDK across snapshots, res
 			emit({"@type": "lock", lock: "l", status: "CLOSED", actor: "controller", action: "allow close"})
 		);
 		await act(async () => emit({"@type": "lock", lock: "l", status: "OPEN", actor: "customer", action: "collect"}));
-		expect(tags).toEqual(["OPEN reopened", "CLOSED allowed"]);
+		await act(async () =>
+			emit({"@type": "lock", lock: "l", status: "CLOSED", actor: "controller", action: "keep close"})
+		);
+		expect(tags).toEqual(["OPEN reopened", "CLOSED allowed", "CLOSED kept"]);
 		// The React package re-exports the same values as the SDK.
-		expect([LOCK_EVENT_ACTOR_CONTROLLER, LOCK_EVENT_ACTION_REOPEN, LOCK_EVENT_ACTION_ALLOW_CLOSE]).toEqual([
-			"controller",
-			"reopen",
-			"allow close",
-		]);
+		expect([
+			LOCK_EVENT_ACTOR_CONTROLLER,
+			LOCK_EVENT_ACTION_REOPEN,
+			LOCK_EVENT_ACTION_ALLOW_CLOSE,
+			LOCK_EVENT_ACTION_KEEP_CLOSE,
+		]).toEqual(["controller", "reopen", "allow close", "keep close"]);
 		// A same-generation resnapshot replaces the setting; null and an absent key both read as off.
 		await act(async () => snapshot({preventCloseAfterOpenSeconds: 45}));
 		expect(read()).toBe("close within 45s");

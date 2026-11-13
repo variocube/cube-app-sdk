@@ -68,24 +68,44 @@ attribution: the controller records the app's `actor` (at most 128 bytes) instea
 `app:<id>@<terminal>`, and `action`, on the opening and on the resulting `lock` event.
 
 While `preventCloseAfterOpenSeconds` is set, the controller reopens a close of a box's lock that does not fall within
-that time (plus 5 seconds of detection grace) after an Open command of that lock. It keeps the close, untagged, on a
-box that is disabled or in maintenance, on the third close within three seconds (it gives up reopening), and on a
-lock that belongs to no box. Every Open command arms the close, whoever sends it, and opening an already open lock
-arms it again. The controller's own reopen does not arm: after one, a close stands only once a new open command was
-sent; an app sends `openBox` or `openLock` for that. There is no arm command: the SDK sends no request for this rule
-and adds none. `lock {generation,revision,lock,status,compartmentNumber?,actor?,action?}` events carry the
-controller's own tags. The SDK passes them through as open strings and exports them as `LOCK_EVENT_ACTOR_CONTROLLER`,
-`LOCK_EVENT_ACTION_REOPEN` and `LOCK_EVENT_ACTION_ALLOW_CLOSE`, with `isReopenedLockEvent` and
-`isAllowedCloseLockEvent` to test an event's actor and action for them:
+that time (plus 5 seconds of detection grace) after an Open command of that lock. It keeps such a close on a box that
+is out of service (maintenance required or disabled) and on the third close of the lock within three seconds (it
+gives up reopening). A lock that belongs to no box keeps its close as well. Every Open command arms the close,
+whoever sends it, and opening an already open lock arms it again. The controller's own reopen does not arm: after
+one, a close stands only once a new open command was sent; an app sends `openBox` or `openLock` for that. There is no
+arm command: the SDK sends no request for this rule and adds none.
+
+`lock {generation,revision,lock,status,compartmentNumber?,actor?,action?}` events carry the controller's own tags.
+The SDK passes them through as open strings and exports them as `LOCK_EVENT_ACTOR_CONTROLLER`,
+`LOCK_EVENT_ACTION_REOPEN`, `LOCK_EVENT_ACTION_ALLOW_CLOSE` and `LOCK_EVENT_ACTION_KEEP_CLOSE`, with
+`isReopenedLockEvent`, `isAllowedCloseLockEvent` and `isKeptCloseLockEvent` to test an event's actor and action for
+them:
 
 | `actor`      | `action`      | `status`            | Meaning                                                               |
 | ------------ | ------------- | ------------------- | --------------------------------------------------------------------- |
 | `controller` | `reopen`      | `OPEN` or `BLOCKED` | The controller's own reopen; no opening by anyone. Never on `CLOSED`. |
 | `controller` | `allow close` | `CLOSED`            | A close kept because an open armed it.                                |
+| `controller` | `keep close`  | `CLOSED`            | Any other close of a box's lock the controller keeps under this rule. |
 
-`reopen` is also the tag of the older `preventCloseNonOccupiedBoxAfterSeconds` rule. Apps write no audit entry, count
-no opening and send no notification for it. A `CLOSED` that is not allowed may still carry the actor and action of an
-app's open shortly before. The closes the controller keeps without an arming open, listed above, are untagged.
+`keep close` (controller-rs#216, implemented in controller-rs#217) has one value for every reason, box out of service
+or lock bouncing; the reason is not on the wire. An armed close is `allow close` in those cases too. So on a cube with
+the setting, a `CLOSED` of a box's lock tagged `allow close` or `keep close` normally stands, and one with neither
+tag is normally followed by a reopen. Such a `CLOSED` may still carry the actor and action of an app's open shortly
+before. The `CLOSED` of a lock of no box stays untagged.
+
+Both halves have exceptions, which the controller's specification lists; an app must not wait without bound for the
+event that normally follows:
+
+- An untagged `CLOSED` stays closed, with no further event, when the reopen is refused by the lock registry or the
+  driver or does not open the door, when the controller restarts before it reopens, when an open of the lock is
+  still pending (that open stands for the reopen), and when the cube configuration is unreadable.
+- A controller before controller-rs#217 sends no `keep close`: it keeps the closes of a box out of service and the
+  one it gave up on untagged, without a reopen.
+- A close tagged `allow close` or `keep close` is still followed by a reopen when it is reported while the reopen of
+  an earlier close of the lock is already starting.
+
+`reopen` is also the tag of the older `preventCloseNonOccupiedBoxAfterSeconds` rule, which tags only its reopens. Apps
+write no audit entry, count no opening and send no notification for a reopen.
 
 Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
 publication uses the contiguous per-session revision, including storage chunks and the ready barrier:

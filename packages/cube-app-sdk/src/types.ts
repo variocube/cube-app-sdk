@@ -46,16 +46,21 @@ export interface LockEvent {
 	 * The action that was passed in the open command leading to this lock event (`OpenContext.action`).
 	 *
 	 * With actor `LOCK_EVENT_ACTOR_CONTROLLER` it is one of the controller's own tags, which
-	 * `isReopenedLockEvent` and `isAllowedCloseLockEvent` test for:
+	 * `isReopenedLockEvent`, `isAllowedCloseLockEvent` and `isKeptCloseLockEvent` test for:
 	 * - `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), on status `OPEN` or `BLOCKED`: the controller opened the lock again by
 	 *   itself after a close it does not accept. Nobody opened the compartment, so write no audit entry, count no
 	 *   opening and send no notification for this event. It does not allow a close either; only a new open does.
 	 * - `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`), on status `CLOSED`: the close was kept because an open
 	 *   shortly before allowed it (see `Cube.preventCloseAfterOpenSeconds`).
+	 * - `LOCK_EVENT_ACTION_KEEP_CLOSE` (`"keep close"`), on status `CLOSED`: the close was kept although no open
+	 *   allowed it, because the compartment is disabled or in maintenance or the controller gave up reopening on
+	 *   the third close of the lock within 3 seconds. The event does not tell which.
 	 *
-	 * A `CLOSED` without the allow tag is not necessarily refused: it can still carry the actor and action of an
-	 * app's open shortly before, and the controller keeps some closes untagged, for example on a compartment that is
-	 * disabled or in maintenance.
+	 * While `Cube.preventCloseAfterOpenSeconds` is set, a `CLOSED` of a compartment's lock with one of the two
+	 * close tags normally stands. One with neither is normally followed by the controller's reopen within moments;
+	 * it can still carry the actor and action of an app's open shortly before. Neither is guaranteed, so wait only
+	 * a bounded time for a reopen and then go by the lock status. A lock that belongs to no compartment keeps its
+	 * close untagged, and a controller that does not know `"keep close"` yet leaves the closes it marks untagged.
 	 */
 	action?: string;
 }

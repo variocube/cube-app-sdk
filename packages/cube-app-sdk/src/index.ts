@@ -30,8 +30,10 @@ export type {
 
 export {
 	isAllowedCloseLockEvent,
+	isKeptCloseLockEvent,
 	isReopenedLockEvent,
 	LOCK_EVENT_ACTION_ALLOW_CLOSE,
+	LOCK_EVENT_ACTION_KEEP_CLOSE,
 	LOCK_EVENT_ACTION_REOPEN,
 	LOCK_EVENT_ACTOR_CONTROLLER,
 } from "./lock-tags.js";
