@@ -28,4 +28,23 @@ describe("native controller payloads", () => {
 		)
 			.toMatchObject({devices: [{types: ["PowerManagement"]}]});
 	});
+
+	it("reads the close-after-open time and treats null, an absent key and unusable values as off", () => {
+		const snapshot = {
+			generation: 1,
+			revision: 0,
+			identity: {cubeId: "cube-1", appId: "app", token: null, expiresAt: null},
+			compartments: [],
+			devices: [],
+			occupancies: [],
+		};
+		const read = (extra: object) =>
+			eventSchemas.initialState.parse({...snapshot, ...extra}) as { preventCloseAfterOpenSeconds?: number };
+		expect(read({preventCloseAfterOpenSeconds: 30}).preventCloseAfterOpenSeconds).toBe(30);
+		expect(read({preventCloseAfterOpenSeconds: 300}).preventCloseAfterOpenSeconds).toBe(300);
+		expect(read({}).preventCloseAfterOpenSeconds).toBeUndefined();
+		for (const value of [null, 0, -1, 12.5, "60", [60], Number.NaN]) {
+			expect(read({preventCloseAfterOpenSeconds: value}).preventCloseAfterOpenSeconds).toBeUndefined();
+		}
+	});
 });

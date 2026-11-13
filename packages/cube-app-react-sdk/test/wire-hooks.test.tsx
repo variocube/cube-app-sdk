@@ -1,12 +1,26 @@
 // @vitest-environment jsdom
-import {connect, Occupancy} from "@variocube/cube-app-sdk";
+import {connect, LockEvent, Occupancy} from "@variocube/cube-app-sdk";
 import React, {act} from "react";
 import {createRoot} from "react-dom/client";
 import {expect, it, vi} from "vitest";
 import fixtures from "../../../test/fixtures/controller-wire.json";
 import {CubeImpl} from "../../cube-app-sdk/src/cube";
 import {ControllerSessionImpl} from "../../cube-app-sdk/src/session";
-import {CubeProvider, useOccupancies, useOccupancy, useStorageItem} from "../src/index";
+import {
+	CubeProvider,
+	isAllowedCloseLockEvent,
+	isKeptCloseLockEvent,
+	isReopenedLockEvent,
+	LOCK_EVENT_ACTION_ALLOW_CLOSE,
+	LOCK_EVENT_ACTION_KEEP_CLOSE,
+	LOCK_EVENT_ACTION_REOPEN,
+	LOCK_EVENT_ACTOR_CONTROLLER,
+	useLockEvent,
+	useOccupancies,
+	useOccupancy,
+	usePreventCloseAfterOpenSeconds,
+	useStorageItem,
+} from "../src/index";
 
 const wire = vi.hoisted(() => ({
 	connected: true,
@@ -146,6 +160,109 @@ it("renders controller lifecycle events through the real SDK cache, including ca
 		// The hooks share the connection's status and reason instead of a separate per-domain availability.
 		expect(read().all).toMatchObject({status: "error", error: {code: "UNAVAILABLE"}});
 		expect(read().all).not.toHaveProperty("data");
+	}
+	finally {
+		await act(async () => session.close());
+		await act(async () => root.unmount());
+	}
+});
+
+it("follows the close-after-open time through the real SDK across snapshots, resnapshots and disconnect", async () => {
+	(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+	wire.connected = true;
+	const session = new ControllerSessionImpl("http://localhost:9000", fetch, {
+		credential: "test-credential-12345",
+		expiresAt: Math.floor(Date.now() / 1000) + 600,
+		generation: 1,
+	});
+	wire.send.mockResolvedValue({protocolMajor: 6, generation: 1});
+	const cube = new CubeImpl({session});
+	vi.mocked(connect).mockReturnValue(cube);
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	const tags: string[] = [];
+	const onLock = (event: LockEvent) => {
+		if (isReopenedLockEvent(event)) tags.push(`${event.status} reopened`);
+		if (isAllowedCloseLockEvent(event)) tags.push(`${event.status} allowed`);
+		if (isKeptCloseLockEvent(event)) tags.push(`${event.status} kept`);
+	};
+	function Probe() {
+		const seconds = usePreventCloseAfterOpenSeconds();
+		useLockEvent(onLock);
+		return <output>{seconds === undefined ? "off" : `close within ${seconds}s`}</output>;
+	}
+	const read = () => container.textContent;
+	let revision = 0;
+	const emit = (event: { "@type": string; [key: string]: unknown }) =>
+		wire.handlers.get(event["@type"])?.({generation: 1, revision: ++revision, ...event}, {isOpen: true});
+	const snapshot = (extra: object) =>
+		emit({
+			"@type": "initialState",
+			identity: {cubeId: "cube-1", appId: "app-a", token: null, expiresAt: null},
+			compartments: [],
+			devices: [],
+			occupancies: [],
+			...extra,
+		});
+	try {
+		await act(async () =>
+			root.render(
+				<CubeProvider session={session}>
+					<Probe />
+				</CubeProvider>,
+			)
+		);
+		await act(async () => {
+			wire.onOpen();
+		});
+		expect(read()).toBe("off");
+		// The setting is known with the snapshot, before the storage barrier makes the connection ready.
+		await act(async () => snapshot({preventCloseAfterOpenSeconds: 120}));
+		expect(read()).toBe("close within 120s");
+		await act(async () => emit({"@type": "ready"}));
+		expect(read()).toBe("close within 120s");
+		await act(async () =>
+			emit({"@type": "lock", lock: "l", status: "OPEN", actor: "controller", action: "reopen"})
+		);
+		await act(async () =>
+			emit({"@type": "lock", lock: "l", status: "CLOSED", actor: "controller", action: "allow close"})
+		);
+		await act(async () => emit({"@type": "lock", lock: "l", status: "OPEN", actor: "customer", action: "collect"}));
+		await act(async () =>
+			emit({"@type": "lock", lock: "l", status: "CLOSED", actor: "controller", action: "keep close"})
+		);
+		expect(tags).toEqual(["OPEN reopened", "CLOSED allowed", "CLOSED kept"]);
+		// The React package re-exports the same values as the SDK.
+		expect([
+			LOCK_EVENT_ACTOR_CONTROLLER,
+			LOCK_EVENT_ACTION_REOPEN,
+			LOCK_EVENT_ACTION_ALLOW_CLOSE,
+			LOCK_EVENT_ACTION_KEEP_CLOSE,
+		]).toEqual(["controller", "reopen", "allow close", "keep close"]);
+		// A same-generation resnapshot replaces the setting; null and an absent key both read as off.
+		await act(async () => snapshot({preventCloseAfterOpenSeconds: 45}));
+		expect(read()).toBe("close within 45s");
+		await act(async () => emit({"@type": "ready"}));
+		await act(async () => snapshot({preventCloseAfterOpenSeconds: null}));
+		expect(read()).toBe("off");
+		await act(async () => emit({"@type": "ready"}));
+		await act(async () => snapshot({preventCloseAfterOpenSeconds: 60}));
+		await act(async () => emit({"@type": "ready"}));
+		expect(read()).toBe("close within 60s");
+		await act(async () => {
+			wire.onClose();
+		});
+		expect(cube.connection.status).toBe("disconnected");
+		expect(read()).toBe("off");
+		// A reconnect to a controller that does not send the setting stays off and still becomes ready.
+		revision = 0;
+		await act(async () => {
+			wire.onOpen();
+		});
+		await act(async () => snapshot({}));
+		await act(async () => emit({"@type": "ready"}));
+		expect(cube.connection.status).toBe("ready");
+		expect(read()).toBe("off");
 	}
 	finally {
 		await act(async () => session.close());

@@ -84,6 +84,57 @@ function RefreshButton() {
 }
 ```
 
+`usePreventCloseAfterOpenSeconds()` returns the seconds after an open within which the door may be closed before the
+controller opens it again, or `undefined` while that rule is off, before the initial state of a connection, and on a
+controller that does not report the setting. It follows connects, resnapshots and disconnects; a changed setting
+arrives only with the next connection. Every open command starts the time and there is no call to arm a close.
+`useLockEvent` receives the controller's own tags. `isReopenedLockEvent`, `isAllowedCloseLockEvent` and
+`isKeptCloseLockEvent` test for them and are re-exported from this package, as are the constants
+`LOCK_EVENT_ACTOR_CONTROLLER`, `LOCK_EVENT_ACTION_REOPEN`, `LOCK_EVENT_ACTION_ALLOW_CLOSE` and
+`LOCK_EVENT_ACTION_KEEP_CLOSE`; see the [root README](../../README.md#close-only-after-opening) for what to do with
+them. A `CLOSED` tagged allowed or kept normally stands; one with neither tag is normally followed by a reopen, for
+which an app waits only a bounded time. The controller's own reopen does not start the time, so after one the app
+offers to open again instead of asking the user to close the door:
+
+```tsx
+import {
+	isReopenedLockEvent,
+	LockEvent,
+	useCube,
+	useLockEvent,
+	usePreventCloseAfterOpenSeconds,
+} from "@variocube/cube-app-react-sdk";
+import React, {useCallback, useState} from "react";
+
+function CloseHint({compartmentNumber}: { compartmentNumber: string }) {
+	const cube = useCube();
+	const seconds = usePreventCloseAfterOpenSeconds();
+	const [reopened, setReopened] = useState(false);
+	const [failed, setFailed] = useState(false);
+	const onLock = useCallback((event: LockEvent) => {
+		if (event.compartmentNumber !== compartmentNumber) return;
+		// Any other event of this compartment, such as the app's own open, ends the hint.
+		setReopened(isReopenedLockEvent(event));
+	}, [compartmentNumber]);
+	useLockEvent(onLock);
+	// The reopen started no time: only a new open command lets the next close stand.
+	const openAgain = () => {
+		setFailed(false);
+		cube.openCompartment(compartmentNumber).catch(() => setFailed(true));
+	};
+	if (reopened) {
+		return (
+			<p>
+				The locker opened again. <button onClick={openAgain}>Open again</button>
+				{seconds !== undefined && <>, then close the door within {seconds} seconds.</>}
+				{failed && <>Opening failed. Please try again.</>}
+			</p>
+		);
+	}
+	return seconds === undefined ? null : <p>Close the door within {seconds} seconds, otherwise it opens again.</p>;
+}
+```
+
 `getToken()` reads the current pushed token for the controller-selected installed app and rejects expired tokens.
 The controller pushes rotations; this method never sends a refresh request. For generated OpenAPI clients, call it from the client's asynchronous
 authorization callback before each request. Do not keep a token captured when constructing a client.

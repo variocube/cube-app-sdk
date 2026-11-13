@@ -20,6 +20,21 @@ returns the current pushed installed-app backend JWT and rejects expired values.
 
 `addEventListener` returns a function that removes the listener; `CubeEventMap` types every event and payload.
 
+`cube.preventCloseAfterOpenSeconds` is the time in seconds after an open within which the door may be closed before
+the controller opens it again; it is `undefined` while that rule is off, before the initial state of a connection, and
+on a controller that does not report the setting. Every open command starts the time, there is no call to arm a close,
+and a changed setting arrives only with the next connection. `lock` events the controller causes itself carry actor
+`LOCK_EVENT_ACTOR_CONTROLLER` and action `LOCK_EVENT_ACTION_REOPEN`, `LOCK_EVENT_ACTION_ALLOW_CLOSE` or
+`LOCK_EVENT_ACTION_KEEP_CLOSE`. `isReopenedLockEvent(event)` recognizes the controller's own reopen (on
+`OPEN`/`BLOCKED`: no opening by anyone, so no audit entry, count or notification), `isAllowedCloseLockEvent(event)` a
+close an open allowed, and `isKeptCloseLockEvent(event)` a close kept without one because the compartment is out of
+service or the controller gave up reopening (both on `CLOSED`). A `CLOSED` of a compartment's lock with one of the
+two close tags normally stands; one with neither is normally followed by a reopen, for which an app waits only a
+bounded time before going by the lock status. A controller before controller-rs#217 sends no `keep close` and leaves
+those closes untagged, without a reopen. A reopen does not start the time: send a new
+`openCompartment`/`openLock` before the door can be closed. See the
+[root README](../../README.md#close-only-after-opening).
+
 A lost mutation result is `COMMAND_OUTCOME_UNKNOWN`; never blindly replay allocation, opening or ending. Read the
 controller's authoritative state to reconcile the known UUID/reference. Caches are bounded and live only in memory.
 `session.close()` discards the credential and ends every connection made from that session, so application shutdown
