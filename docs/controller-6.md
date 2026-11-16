@@ -81,20 +81,22 @@ The SDK passes them through as open strings and exports them as `LOCK_EVENT_ACTO
 `isReopenedLockEvent`, `isAllowedCloseLockEvent` and `isKeptCloseLockEvent` to test an event's actor and action for
 them:
 
-| `actor`      | `action`      | `status`            | Meaning                                                               |
-| ------------ | ------------- | ------------------- | --------------------------------------------------------------------- |
-| `controller` | `reopen`      | `OPEN` or `BLOCKED` | The controller's own reopen; no opening by anyone. Never on `CLOSED`. |
-| `controller` | `allow close` | `CLOSED`            | A close kept because an open armed it.                                |
-| `controller` | `keep close`  | `CLOSED`            | Any other close of a box's lock the controller keeps under this rule. |
+| `actor`      | `action`      | `status`  | Meaning                                                                |
+| ------------ | ------------- | --------- | ---------------------------------------------------------------------- |
+| `controller` | `reopen`      | `OPEN`    | The controller's own reopen; no opening by anyone. Never on `CLOSED`.  |
+| `controller` | `reopen`      | `BLOCKED` | The emulated `BLOCKED` of a reopen that failed; the door stays closed. |
+| `controller` | `allow close` | `CLOSED`  | A close kept because an open armed it.                                 |
+| `controller` | `keep close`  | `CLOSED`  | Any other close of a box's lock the controller keeps under this rule.  |
 
-`keep close` (controller-rs#216, implemented in controller-rs#217) has one value for every reason, box out of service
+`keep close` (controller-rs#216, controller-rs#217) has one value for every reason, box out of service
 or lock bouncing; the reason is not on the wire. An armed close is `allow close` in those cases too. So on a cube with
 the setting, a `CLOSED` of a box's lock tagged `allow close` or `keep close` normally stands, and one with neither
 tag is normally followed by a reopen. Such a `CLOSED` may still carry the actor and action of an app's open shortly
 before. The `CLOSED` of a lock of no box stays untagged.
 
-Both halves have exceptions, which the controller's specification lists; an app must not wait without bound for the
-event that normally follows:
+Both halves have exceptions, which the controller's specification lists under
+[closes that stay untagged](https://github.com/variocube/controller-rs/blob/main/docs/spec/drivers.md#closes-that-stay-untagged);
+an app must not wait without bound for the event that normally follows:
 
 - An untagged `CLOSED` stays closed, with no further event, when the reopen is refused by the lock registry or the
   driver or does not open the door, when the controller restarts before it reopens, when an open of the lock is
@@ -104,8 +106,11 @@ event that normally follows:
 - A close tagged `allow close` or `keep close` is still followed by a reopen when it is reported while the reopen of
   an earlier close of the lock is already starting.
 
-`reopen` is also the tag of the older `preventCloseNonOccupiedBoxAfterSeconds` rule, which tags only its reopens. Apps
-write no audit entry, count no opening and send no notification for a reopen.
+`reopen` is also the tag of the older `preventCloseNonOccupiedBoxAfterSeconds` rule, which tags only its reopens. The
+tag alone does not tell that the door opened. On the reopen's `OPEN`, apps write no audit entry, count no opening and
+send no notification. A `BLOCKED` carrying the tag is a reopen that failed; it counts as blocked, not as a reopen,
+and apps handle it like any blocked lock (safecube#1135). `isReopenedLockEvent` compares actor and action only, so an
+app checks the status as well.
 
 Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
 publication uses the contiguous per-session revision, including storage chunks and the ready barrier:

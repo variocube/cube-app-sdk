@@ -1377,8 +1377,10 @@ describe("close only after opening", () => {
 		expect(isReopenedLockEvent(kept)).toBe(false);
 		expect(isKeptCloseLockEvent(allowed)).toBe(false);
 		expect(isKeptCloseLockEvent(reopened)).toBe(false);
-		// The status is not part of the tag.
+		// The status is not part of the tag: a reopen that failed arrives as a tagged BLOCKED, and telling it from
+		// the reopen's OPEN is left to the caller.
 		expect(isReopenedLockEvent({lock: "lock-1", status: "BLOCKED", ...reopened} as LockEvent)).toBe(true);
+		expect(isReopenedLockEvent({lock: "lock-1", status: "OPEN", ...reopened} as LockEvent)).toBe(true);
 		expect(isAllowedCloseLockEvent({lock: "lock-1", status: "CLOSED", ...allowed} as LockEvent)).toBe(true);
 		expect(isKeptCloseLockEvent({lock: "lock-1", status: "CLOSED", ...kept} as LockEvent)).toBe(true);
 		for (

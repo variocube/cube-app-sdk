@@ -93,28 +93,35 @@ action `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), `LOCK_EVENT_ACTION_ALLOW_CLOSE` 
 `LOCK_EVENT_ACTION_KEEP_CLOSE` (`"keep close"`). `isReopenedLockEvent(event)`, `isAllowedCloseLockEvent(event)` and
 `isKeptCloseLockEvent(event)` test for the three tags; they compare actor and action only, not the status:
 
-| Helper                    | Action        | Status             | Meaning                                                           |
-| ------------------------- | ------------- | ------------------ | ----------------------------------------------------------------- |
-| `isReopenedLockEvent`     | `reopen`      | `OPEN` / `BLOCKED` | The controller opened the lock again by itself. Nobody opened it. |
-| `isAllowedCloseLockEvent` | `allow close` | `CLOSED`           | The close was kept because an open shortly before allowed it.     |
-| `isKeptCloseLockEvent`    | `keep close`  | `CLOSED`           | The close was kept although no open allowed it.                   |
+| Helper                    | Action        | Status    | Meaning                                                           |
+| ------------------------- | ------------- | --------- | ----------------------------------------------------------------- |
+| `isReopenedLockEvent`     | `reopen`      | `OPEN`    | The controller opened the lock again by itself. Nobody opened it. |
+| `isReopenedLockEvent`     | `reopen`      | `BLOCKED` | The controller's reopen failed. The lock is blocked, not opened.  |
+| `isAllowedCloseLockEvent` | `allow close` | `CLOSED`  | The close was kept because an open shortly before allowed it.     |
+| `isKeptCloseLockEvent`    | `keep close`  | `CLOSED`  | The close was kept although no open allowed it.                   |
 
 ```typescript
 import {isAllowedCloseLockEvent, isKeptCloseLockEvent, isReopenedLockEvent} from "@variocube/cube-app-sdk";
 
 cube.addEventListener("lock", event => {
-	if (isReopenedLockEvent(event)) return offerOpenAgain();
+	// A tagged BLOCKED is a reopen that failed; it falls through to the ordinary blocked handling.
+	if (event.status === "OPEN" && isReopenedLockEvent(event)) return offerOpenAgain();
 	if (event.status === "OPEN") recordOpening(event.actor, event.action);
+	if (event.status === "BLOCKED") showBlocked(event.lock);
 	if (event.status === "CLOSED" && isAllowedCloseLockEvent(event)) finishHandover();
 	if (event.status === "CLOSED" && isKeptCloseLockEvent(event)) showDoorStaysClosed();
 });
 ```
 
-For a reopen, write no audit entry, count no opening and send no notification. A reopen does not allow a close: the
-door is open, but closing it now is refused again, because only an open command starts the time. Show a hint that the
-locker opened again, with opening as its action, and send `openCompartment` or `openLock` when the user takes it (this
-also works on the already open lock); the door can then be closed within the time. Do not ask the user to just close
-the door after a reopen.
+The reopen tag alone does not mean the door opened; the helper does not look at the status, so check it as well. On
+`OPEN` the controller opened the lock again: write no audit entry, count no opening and send no notification. A
+reopen does not allow a close: the door is open, but closing it now is refused again, because only an open command
+starts the time. Show a hint that the locker opened again, with opening as its action, and send `openCompartment` or
+`openLock` when the user takes it (this also works on the already open lock); the door can then be closed within the
+time. Do not ask the user to just close the door after a reopen.
+
+On `BLOCKED` the reopen failed. It counts as blocked, not as a reopen: the door is still closed, so show no hint that
+the locker opened again and handle the event like any blocked lock.
 
 The controller keeps a close no open allowed, and tags it `keep close`, when the compartment is out of service
 (disabled or in maintenance) or when it gave up reopening on the third close of the lock within 3 seconds; the event

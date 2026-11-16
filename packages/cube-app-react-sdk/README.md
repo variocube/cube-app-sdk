@@ -94,7 +94,9 @@ arrives only with the next connection. Every open command starts the time and th
 `LOCK_EVENT_ACTION_KEEP_CLOSE`; see the [root README](../../README.md#close-only-after-opening) for what to do with
 them. A `CLOSED` tagged allowed or kept normally stands; one with neither tag is normally followed by a reopen, for
 which an app waits only a bounded time. The controller's own reopen does not start the time, so after one the app
-offers to open again instead of asking the user to close the door:
+offers to open again instead of asking the user to close the door. The reopen tag also arrives on `BLOCKED`, when the
+reopen failed and the door is still closed; that is handled like any blocked lock, so the hint is shown only for a
+tagged `OPEN`:
 
 ```tsx
 import {
@@ -113,8 +115,9 @@ function CloseHint({compartmentNumber}: { compartmentNumber: string }) {
 	const [failed, setFailed] = useState(false);
 	const onLock = useCallback((event: LockEvent) => {
 		if (event.compartmentNumber !== compartmentNumber) return;
-		// Any other event of this compartment, such as the app's own open, ends the hint.
-		setReopened(isReopenedLockEvent(event));
+		// Any other event of this compartment, such as the app's own open, ends the hint. So does a tagged BLOCKED:
+		// that reopen failed and the door is still closed.
+		setReopened(event.status === "OPEN" && isReopenedLockEvent(event));
 	}, [compartmentNumber]);
 	useLockEvent(onLock);
 	// The reopen started no time: only a new open command lets the next close stand.

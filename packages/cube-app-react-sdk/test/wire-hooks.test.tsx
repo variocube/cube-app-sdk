@@ -182,7 +182,9 @@ it("follows the close-after-open time through the real SDK across snapshots, res
 	const root = createRoot(container);
 	const tags: string[] = [];
 	const onLock = (event: LockEvent) => {
-		if (isReopenedLockEvent(event)) tags.push(`${event.status} reopened`);
+		// As the README advises: only a tagged OPEN is a reopen; a tagged BLOCKED is a reopen that failed.
+		if (event.status === "OPEN" && isReopenedLockEvent(event)) tags.push(`${event.status} reopened`);
+		if (event.status === "BLOCKED") tags.push(isReopenedLockEvent(event) ? "BLOCKED reopen failed" : "BLOCKED");
 		if (isAllowedCloseLockEvent(event)) tags.push(`${event.status} allowed`);
 		if (isKeptCloseLockEvent(event)) tags.push(`${event.status} kept`);
 	};
@@ -231,7 +233,10 @@ it("follows the close-after-open time through the real SDK across snapshots, res
 		await act(async () =>
 			emit({"@type": "lock", lock: "l", status: "CLOSED", actor: "controller", action: "keep close"})
 		);
-		expect(tags).toEqual(["OPEN reopened", "CLOSED allowed", "CLOSED kept"]);
+		await act(async () =>
+			emit({"@type": "lock", lock: "l", status: "BLOCKED", actor: "controller", action: "reopen"})
+		);
+		expect(tags).toEqual(["OPEN reopened", "CLOSED allowed", "CLOSED kept", "BLOCKED reopen failed"]);
 		// The React package re-exports the same values as the SDK.
 		expect([
 			LOCK_EVENT_ACTOR_CONTROLLER,
