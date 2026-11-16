@@ -2,11 +2,16 @@
 import {VcmpClient, type VcmpMessage} from "@variocube/vcmp";
 import {WebSocket} from "ws";
 
-export interface Launch {
+/** A `kiosk:Launch` reply: the destination without any grant and the ticket the kiosk's browser opens. */
+interface LaunchReply {
 	url: string;
 	launchId: string;
 	expiresAt: number;
+	ticketUrl: string;
 }
+
+/** A launch whose ticket was opened: `url` is where the ticket led, the app URL with its `#vc-bootstrap=` grant. */
+export type Launch = LaunchReply;
 
 interface DriverDevice {
 	id: string;
@@ -70,8 +75,19 @@ export class MockKiosk extends MockDriver {
 		super(endpoint, "kiosk", {id: "sdk-test-kiosk", type: "Kiosk"});
 	}
 
-	/** Launches the app URL, or a variant of it such as the one a kiosk on the secondary side launches. */
-	launch(url = this.appUrl): Promise<Launch> {
-		return this.client.send({"@type": "kiosk:Launch", id: this.id, url});
+	/**
+	 * Launches the app URL, or a variant of it such as the one a kiosk on the secondary side launches, and opens the
+	 * reply's launch ticket as the kiosk's browser does (controller-rs#227). No reply carries a grant: the controller
+	 * answers the ticket with `303` to the app URL with a fresh one-use grant, and that URL is the launch's `url` here.
+	 * A reply without `ticketUrl` is refused, as the kiosk refuses it: the SDK requires a controller that sends one.
+	 */
+	async launch(url = this.appUrl): Promise<Launch> {
+		const reply: LaunchReply = await this.client.send({"@type": "kiosk:Launch", id: this.id, url});
+		if (typeof reply.ticketUrl !== "string") throw new Error("kiosk:Launch reply without ticketUrl");
+		if (reply.url.includes("vc-bootstrap")) throw new Error("kiosk:Launch reply carries a grant");
+		const ticket = await fetch(reply.ticketUrl, {redirect: "manual", signal: AbortSignal.timeout(5000)});
+		const location = ticket.headers.get("location");
+		if (ticket.status !== 303 || !location) throw new Error(`launch ticket answered ${ticket.status}`);
+		return {...reply, url: location};
 	}
 }

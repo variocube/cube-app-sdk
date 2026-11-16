@@ -18,7 +18,10 @@ Stage: [controller-rs #5](https://github.com/variocube/controller-rs/issues/5).
 `POST /app/renew` and `Authorization: Bearer <local credential>`. Times are Unix seconds. Credentials remain in memory,
 renew 30 seconds before expiry and are never sent as URL parameters. Fetch omits cookies, disables caching/referrers,
 and rejects redirects. A grant is delivered as `#vc-bootstrap=<percent-encoded JSON {grant,fragment}>`; fragment includes
-its original leading `#` or is empty. Cleanup happens synchronously, including malformed envelopes.
+its original leading `#` or is empty. Cleanup happens synchronously, including malformed envelopes. The kiosk's
+`kiosk:Launch` reply carries no grant ([controller-rs#227](https://github.com/variocube/controller-rs/issues/227)): the
+kiosk opens the reply's one-use launch ticket, and the controller answers it with `303` to the app URL with that
+fragment. The page sees the same envelope as before; only the way it arrives changed.
 
 WebSocket `/app` uses VCMP. First request: `{ "@type":"authenticate", "protocolMajor":6, "credential":"..." }`.
 Its ACK is `{protocolMajor:6,generation,secondary}`. `secondary` is the authenticated terminal's side of the cube
@@ -121,7 +124,8 @@ cannot issue a grant to this helper, choose navigation or trigger automatic retr
 credential storage, referrer suppression and reload requiring fresh bootstrap. HTTP exchange is a controlled test
 boundary in this suite; it does not stand in for native controller or physical kiosk evidence.
 `npm run test:controller`: opt-in real native Rust lifecycle/storage/token tests using a retained VCMP kiosk driver,
-plus real SDK restart dispatch to mock local kiosk/ComputeUnit drivers.
+which opens each launch's ticket as a kiosk does, plus real SDK restart dispatch to mock local kiosk/ComputeUnit
+drivers.
 
 Physical Cog/Chromium touch, VT, driver feedback and full upgrade/fleet evidence are recorded by the coordinated
 controller/kiosk stages. This SDK branch alone does not establish their acceptance or publish a release.
