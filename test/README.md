@@ -26,8 +26,10 @@ variocube-controller dev --fixture single --listen 127.0.0.1:9000 --state /tmp/s
 CONTROLLER_URL=http://localhost:9000 npm run test:controller
 ```
 
-The test registers a retained local `Kiosk` driver, requests `kiosk:Launch`, cleans and exchanges the fragment, and connects
-the actual SDK with browser-origin headers. It exercises reserve/confirm/access/update/end, nullable and binary storage, app JWT audience
+The test registers a retained local `Kiosk` driver and requests `kiosk:Launch`. The reply carries no grant
+([controller-rs#227](https://github.com/variocube/controller-rs/issues/227)): the test opens its `ticketUrl` as the
+kiosk's browser does, takes the `303`'s `Location`, the app URL with the grant, and refuses a reply without a ticket.
+It then cleans and exchanges that URL's fragment and connects the actual SDK with browser-origin headers. It exercises reserve/confirm/access/update/end, nullable and binary storage, app JWT audience
 and raw unauthorized renewal. A local `ComputeUnit` driver and the kiosk acknowledge real SDK UI, OS and controller restart
 requests without executing physical actions. Use an isolated fixture instance: the test accepts real domain mutations.
 
