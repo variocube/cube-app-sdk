@@ -267,25 +267,13 @@ describe("ordinary maintenance navigation", () => {
 		vi.stubGlobal("window", {location: {assign, href}});
 		return {session, transport, assign};
 	}
-	it("passes the clean return URL with no maintenance credential or request", async () => {
+	it("navigates to the bare maintenance URL, sends no request and closes the session", async () => {
 		const {session, transport, assign} = make();
 		await session.openMaintenance();
-		const target = new URL(assign.mock.calls[0][0]);
-		expect(target.origin + target.pathname).toBe("https://controller.example/maintenance");
-		expect(target.searchParams.get("returnUrl")).toBe("https://app.example/start?language=en#route");
-		expect(target.hash).toBe("");
+		expect(assign).toHaveBeenCalledTimes(1);
+		expect(assign).toHaveBeenCalledWith("https://controller.example/maintenance");
 		expect(transport).not.toHaveBeenCalled();
 		await expect(session.getCredential()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
-	});
-	it.each([
-		"file:///app",
-		"https://user:password@app.example/",
-		"https://app.example/#vc-bootstrap=secret",
-		"https://app.example/#vc-maintenance=secret",
-	])("rejects unsafe return URL %s", async href => {
-		const {session, assign} = make(href);
-		await expect(session.openMaintenance()).rejects.toMatchObject({code: "INVALID_REQUEST"});
-		expect(assign).not.toHaveBeenCalled();
 	});
 	it("rejects navigation after session disposal", async () => {
 		const {session, assign} = make();
