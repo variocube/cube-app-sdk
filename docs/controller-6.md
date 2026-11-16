@@ -87,9 +87,10 @@ initial snapshot fails with `TIMEOUT` when 10 seconds pass between consecutive p
 `initialState` to `ready` (storage items, deletions and chunks), and a chunked item fails with `TIMEOUT` when 10 seconds
 pass without its next chunk.
 
-`session.openMaintenance()` navigates normally to the trusted controller's `/maintenance?returnUrl=...`, carrying only
-the clean current app URL. It requests no maintenance context and passes no credential in that URL. Technician login
-belongs to the maintenance UI.
+`session.openMaintenance()` navigates normally to the trusted controller's `/maintenance`, with no query. It requests no
+maintenance context and passes no credential in that URL. Technician login belongs to the maintenance UI. Leave there
+returns to the terminal's app with a fresh launch and grant, not to the current URL; the controller decides, and the SDK
+requires a controller that does so.
 
 The controller relaunches the kiosk on a relaunch request or a configuration/kiosk change, not when an app credential
 expires. Whenever the SDK concludes that a fresh kiosk launch is required, it makes at most one bounded

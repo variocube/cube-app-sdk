@@ -73,7 +73,10 @@ export function bootstrapSession(options: BootstrapOptions = {}): Promise<Contro
 export interface ControllerSession {
 	/** The trusted controller origin. */
 	readonly endpoint: string;
-	/** Navigates to the controller's maintenance UI, which returns to the current URL. Ends this session. */
+	/**
+	 * Navigates to the controller's maintenance UI; Leave there launches the terminal's app afresh. Ends this
+	 * session.
+	 */
 	openMaintenance(): Promise<void>;
 	/** Discards the credential and terminates every connection made from this session. */
 	close(): void;
@@ -155,19 +158,10 @@ export class ControllerSessionImpl implements ControllerSession {
 		});
 	}
 
-	/** Navigate normally; technician authentication happens in the maintenance UI. */
+	/** Navigate normally to `<endpoint>/maintenance`; technician authentication happens in the maintenance UI. */
 	async openMaintenance(): Promise<void> {
 		if (this.#closed) throw authenticationRequired();
-		const target = new URL("/maintenance", this.endpoint);
-		const current = new URL(window.location.href);
-		if (
-			!["http:", "https:"].includes(current.protocol) || current.username || current.password
-			|| current.hash.startsWith(ENVELOPE) || current.hash.startsWith("#vc-maintenance=")
-		) {
-			throw new CubeError("INVALID_REQUEST", "Expected a clean application return URL.");
-		}
-		target.searchParams.set("returnUrl", current.href);
-		window.location.assign(target.href);
+		window.location.assign(new URL("/maintenance", this.endpoint).href);
 		this.close();
 	}
 
