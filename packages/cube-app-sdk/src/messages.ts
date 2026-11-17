@@ -94,6 +94,11 @@ export interface InitialStateMessage extends VcmpMessage, WireBoundary {
 	compartments: Compartment[];
 	devices: Device[];
 	occupancies: Occupancy[];
+	/**
+	 * Seconds after an open within which the lock may be closed. On the wire the rule being off is `null`, and a
+	 * controller older than the rule omits the key; validation normalizes both, and any unusable value, to absent.
+	 */
+	preventCloseAfterOpenSeconds?: number;
 }
 
 /** Commits the initial snapshot including the complete storage. */

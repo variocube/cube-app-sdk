@@ -87,6 +87,11 @@ export const initialStateSchema = z.object({
 	compartments: z.array(compartmentSchema).max(4096),
 	devices: z.array(deviceSchema).max(4096),
 	occupancies: z.array(occupancySchema).max(65536),
+	// Additive: a controller older than the rule omits the key, and null means the rule is off. Neither that nor a
+	// value this SDK cannot use may fail the snapshot, so everything but a positive integer reads as off.
+	preventCloseAfterOpenSeconds: z.unknown().optional().transform(value =>
+		typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined
+	),
 });
 export const eventSchemas: Record<string, z.ZodType> = {
 	initialState: initialStateSchema,
