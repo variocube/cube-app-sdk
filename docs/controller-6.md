@@ -78,8 +78,7 @@ arm command: the SDK sends no request for this rule and adds none.
 `lock {generation,revision,lock,status,compartmentNumber?,actor?,action?}` events carry the controller's own tags.
 The SDK passes them through as open strings and exports them as `LOCK_EVENT_ACTOR_CONTROLLER`,
 `LOCK_EVENT_ACTION_REOPEN`, `LOCK_EVENT_ACTION_ALLOW_CLOSE` and `LOCK_EVENT_ACTION_KEEP_CLOSE`, with
-`isReopenedLockEvent`, `isAllowedCloseLockEvent` and `isKeptCloseLockEvent` to test an event's actor and action for
-them:
+`isReopenedLockEvent`, `isAllowedCloseLockEvent` and `isKeptCloseLockEvent` to test an event for them:
 
 | `actor`      | `action`      | `status`  | Meaning                                                                |
 | ------------ | ------------- | --------- | ---------------------------------------------------------------------- |
@@ -109,8 +108,10 @@ an app must not wait without bound for the event that normally follows:
 `reopen` is also the tag of the older `preventCloseNonOccupiedBoxAfterSeconds` rule, which tags only its reopens. The
 tag alone does not tell that the door opened. On the reopen's `OPEN`, apps write no audit entry, count no opening and
 send no notification. A `BLOCKED` carrying the tag is a reopen that failed; it counts as blocked, not as a reopen,
-and apps handle it like any blocked lock (safecube#1135). `isReopenedLockEvent` compares actor and action only, so an
-app checks the status as well.
+and apps handle it like any blocked lock (safecube#1135). `isReopenedLockEvent` therefore requires status `OPEN`
+besides actor and action and is false for the tagged `BLOCKED`; the wire is unchanged, so an app that needs to
+recognise a failed reopen compares status, actor and action itself. `isAllowedCloseLockEvent` and
+`isKeptCloseLockEvent` compare actor and action only.
 
 Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
 publication uses the contiguous per-session revision, including storage chunks and the ready barrier:

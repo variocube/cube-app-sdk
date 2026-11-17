@@ -48,10 +48,11 @@ export interface LockEvent {
 	 * With actor `LOCK_EVENT_ACTOR_CONTROLLER` it is one of the controller's own tags, which
 	 * `isReopenedLockEvent`, `isAllowedCloseLockEvent` and `isKeptCloseLockEvent` test for:
 	 * - `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), on status `OPEN` or `BLOCKED`: the controller's own reopen after a
-	 *   close it does not accept. The tag alone does not mean the door opened. On `OPEN` the controller opened the
-	 *   lock again: nobody opened the compartment, so write no audit entry, count no opening and send no
-	 *   notification for this event; it does not allow a close either, only a new open does. On `BLOCKED` the
-	 *   reopen failed: the lock is blocked and the door still closed, so handle it like any blocked lock.
+	 *   close it does not accept. The tag alone does not mean the door opened. On `OPEN`, which is what
+	 *   `isReopenedLockEvent` matches, the controller opened the lock again: nobody opened the compartment, so
+	 *   write no audit entry, count no opening and send no notification for this event; it does not allow a close
+	 *   either, only a new open does. On `BLOCKED` the reopen failed: the lock is blocked and the door still
+	 *   closed, so handle it like any blocked lock.
 	 * - `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`), on status `CLOSED`: the close was kept because an open
 	 *   shortly before allowed it (see `Cube.preventCloseAfterOpenSeconds`).
 	 * - `LOCK_EVENT_ACTION_KEEP_CLOSE` (`"keep close"`), on status `CLOSED`: the close was kept although no open

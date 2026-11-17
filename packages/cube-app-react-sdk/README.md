@@ -95,8 +95,8 @@ arrives only with the next connection. Every open command starts the time and th
 them. A `CLOSED` tagged allowed or kept normally stands; one with neither tag is normally followed by a reopen, for
 which an app waits only a bounded time. The controller's own reopen does not start the time, so after one the app
 offers to open again instead of asking the user to close the door. The reopen tag also arrives on `BLOCKED`, when the
-reopen failed and the door is still closed; that is handled like any blocked lock, so the hint is shown only for a
-tagged `OPEN`:
+reopen failed and the door is still closed; that is handled like any blocked lock, and `isReopenedLockEvent` is false
+for it, so the hint is shown only for a tagged `OPEN`:
 
 ```tsx
 import {
@@ -115,9 +115,9 @@ function CloseHint({compartmentNumber}: { compartmentNumber: string }) {
 	const [failed, setFailed] = useState(false);
 	const onLock = useCallback((event: LockEvent) => {
 		if (event.compartmentNumber !== compartmentNumber) return;
-		// Any other event of this compartment, such as the app's own open, ends the hint. So does a tagged BLOCKED:
-		// that reopen failed and the door is still closed.
-		setReopened(event.status === "OPEN" && isReopenedLockEvent(event));
+		// Any other event of this compartment, such as the app's own open, ends the hint. So does the BLOCKED of a
+		// reopen that failed: the helper is false for it, and the door is still closed.
+		setReopened(isReopenedLockEvent(event));
 	}, [compartmentNumber]);
 	useLockEvent(onLock);
 	// The reopen started no time: only a new open command lets the next close stand.
@@ -130,7 +130,7 @@ function CloseHint({compartmentNumber}: { compartmentNumber: string }) {
 			<p>
 				The locker opened again. <button onClick={openAgain}>Open again</button>
 				{seconds !== undefined && <>, then close the door within {seconds} seconds.</>}
-				{failed && <>Opening failed. Please try again.</>}
+				{failed && <>{" "}Opening failed. Please try again.</>}
 			</p>
 		);
 	}

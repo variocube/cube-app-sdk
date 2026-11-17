@@ -12,9 +12,8 @@ export const LOCK_EVENT_ACTOR_CONTROLLER = "controller";
  * shortly before (see `Cube.preventCloseAfterOpenSeconds`) or was closed on a compartment that is not occupied. It
  * arrives with actor `LOCK_EVENT_ACTOR_CONTROLLER` on status `OPEN` or `BLOCKED`, never on `CLOSED`.
  *
- * The tag alone does not mean the door opened. On `OPEN` the controller opened the lock again. On `BLOCKED` the
- * reopen failed: the lock is blocked and the door is still closed. Use `isReopenedLockEvent` together with the
- * status.
+ * The tag alone does not mean the door opened. On `OPEN` the controller opened the lock again; that is what
+ * `isReopenedLockEvent` tests for. On `BLOCKED` the reopen failed: the lock is blocked and the door is still closed.
  */
 export const LOCK_EVENT_ACTION_REOPEN = "reopen";
 
@@ -34,19 +33,22 @@ export const LOCK_EVENT_ACTION_ALLOW_CLOSE = "allow close";
 export const LOCK_EVENT_ACTION_KEEP_CLOSE = "keep close";
 
 /**
- * Whether the lock event carries the tag of the controller's own reopen: actor `LOCK_EVENT_ACTOR_CONTROLLER` with
- * action `LOCK_EVENT_ACTION_REOPEN`. Only actor and action are checked, not the status, so the result alone does
- * not mean the door opened. Check `status` as well:
+ * Whether the lock event reports that the controller opened the lock again by itself: status `OPEN` with actor
+ * `LOCK_EVENT_ACTOR_CONTROLLER` and action `LOCK_EVENT_ACTION_REOPEN`.
  *
- * - `OPEN`: the controller opened the lock again. Nobody opened the compartment: write no audit entry, count no
- *   opening and send no notification for it. A reopen does not allow a close. The next close is refused again
- *   unless a new open command is sent first, so offer opening again (`openCompartment` or `openLock`, which also
- *   works on the already open lock) rather than asking the user to close the door.
- * - `BLOCKED`: the reopen failed. It counts as blocked, not as a reopen: the door is still closed, so show no hint
- *   that the locker opened again and handle the event like any blocked lock.
+ * Nobody opened the compartment: write no audit entry, count no opening and send no notification for it. A reopen
+ * does not allow a close. The next close is refused again unless a new open command is sent first, so offer opening
+ * again (`openCompartment` or `openLock`, which also works on the already open lock) rather than asking the user to
+ * close the door.
+ *
+ * The controller also puts the tag on the `BLOCKED` of a reopen that failed. This is false for it, as for any other
+ * status: a failed reopen counts as blocked, not as a reopen. The door is still closed, so handle the event like
+ * any blocked lock. An app that needs to tell a failed reopen from another blocked lock compares
+ * `status === "BLOCKED"`, the actor and the action itself.
  */
-export function isReopenedLockEvent(event: Pick<LockEvent, "actor" | "action">): boolean {
-	return event.actor === LOCK_EVENT_ACTOR_CONTROLLER && event.action === LOCK_EVENT_ACTION_REOPEN;
+export function isReopenedLockEvent(event: Pick<LockEvent, "status" | "actor" | "action">): boolean {
+	return event.status === "OPEN" && event.actor === LOCK_EVENT_ACTOR_CONTROLLER
+		&& event.action === LOCK_EVENT_ACTION_REOPEN;
 }
 
 /**

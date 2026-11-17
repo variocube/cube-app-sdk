@@ -25,15 +25,15 @@ the controller opens it again; it is `undefined` while that rule is off, before 
 on a controller that does not report the setting. Every open command starts the time, there is no call to arm a close,
 and a changed setting arrives only with the next connection. `lock` events the controller causes itself carry actor
 `LOCK_EVENT_ACTOR_CONTROLLER` and action `LOCK_EVENT_ACTION_REOPEN`, `LOCK_EVENT_ACTION_ALLOW_CLOSE` or
-`LOCK_EVENT_ACTION_KEEP_CLOSE`. `isReopenedLockEvent(event)` recognizes the tag of the controller's own reopen without
-looking at the status: on `OPEN` the controller opened the lock again (no opening by anyone, so no audit entry, count
-or notification), on `BLOCKED` the reopen failed and the event is handled like any blocked lock.
-`isAllowedCloseLockEvent(event)` recognizes a close an open allowed, and `isKeptCloseLockEvent(event)` a close kept without one because the compartment is out of
-service or the controller gave up reopening (both on `CLOSED`). A `CLOSED` of a compartment's lock with one of the
-two close tags normally stands; one with neither is normally followed by a reopen, for which an app waits only a
-bounded time before going by the lock status. A controller before controller-rs#217 sends no `keep close` and leaves
-those closes untagged, without a reopen. A reopen does not start the time: send a new
-`openCompartment`/`openLock` before the door can be closed. See the
+`LOCK_EVENT_ACTION_KEEP_CLOSE`. `isReopenedLockEvent(event)` recognizes the controller's own reopen, the tag on status
+`OPEN`: no opening by anyone, so no audit entry, count or notification. It is false for the tagged `BLOCKED` of a
+reopen that failed, which is handled like any blocked lock. `isAllowedCloseLockEvent(event)` recognizes a close an
+open allowed, and `isKeptCloseLockEvent(event)` a close kept without one because the compartment is out of service or
+the controller gave up reopening; both arrive on `CLOSED`, and these two helpers compare actor and action only. A
+`CLOSED` of a compartment's lock with one of the two close tags normally stands; one with neither is normally
+followed by a reopen, for which an app waits only a bounded time before going by the lock status. A controller before
+controller-rs#217 sends no `keep close` and leaves those closes untagged, without a reopen. A reopen does not start
+the time: send a new `openCompartment`/`openLock` before the door can be closed. See the
 [root README](../../README.md#close-only-after-opening).
 
 A lost mutation result is `COMMAND_OUTCOME_UNKNOWN`; never blindly replay allocation, opening or ending. Read the

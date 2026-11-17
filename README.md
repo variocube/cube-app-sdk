@@ -91,12 +91,13 @@ arrives only with the next connection.
 The controller tags the `lock` events it causes itself with actor `LOCK_EVENT_ACTOR_CONTROLLER` (`"controller"`) and
 action `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`) or
 `LOCK_EVENT_ACTION_KEEP_CLOSE` (`"keep close"`). `isReopenedLockEvent(event)`, `isAllowedCloseLockEvent(event)` and
-`isKeptCloseLockEvent(event)` test for the three tags; they compare actor and action only, not the status:
+`isKeptCloseLockEvent(event)` test for them. The two close helpers compare actor and action only; the reopen helper
+also requires status `OPEN`, because the controller puts the reopen tag on the `BLOCKED` of a failed reopen as well:
 
 | Helper                    | Action        | Status    | Meaning                                                           |
 | ------------------------- | ------------- | --------- | ----------------------------------------------------------------- |
 | `isReopenedLockEvent`     | `reopen`      | `OPEN`    | The controller opened the lock again by itself. Nobody opened it. |
-| `isReopenedLockEvent`     | `reopen`      | `BLOCKED` | The controller's reopen failed. The lock is blocked, not opened.  |
+| none (false)              | `reopen`      | `BLOCKED` | The controller's reopen failed. The lock is blocked, not opened.  |
 | `isAllowedCloseLockEvent` | `allow close` | `CLOSED`  | The close was kept because an open shortly before allowed it.     |
 | `isKeptCloseLockEvent`    | `keep close`  | `CLOSED`  | The close was kept although no open allowed it.                   |
 
@@ -104,24 +105,25 @@ action `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), `LOCK_EVENT_ACTION_ALLOW_CLOSE` 
 import {isAllowedCloseLockEvent, isKeptCloseLockEvent, isReopenedLockEvent} from "@variocube/cube-app-sdk";
 
 cube.addEventListener("lock", event => {
-	// A tagged BLOCKED is a reopen that failed; it falls through to the ordinary blocked handling.
-	if (event.status === "OPEN" && isReopenedLockEvent(event)) return offerOpenAgain();
+	if (isReopenedLockEvent(event)) return offerOpenAgain();
 	if (event.status === "OPEN") recordOpening(event.actor, event.action);
+	// Includes the BLOCKED of a reopen that failed, which is handled like any blocked lock.
 	if (event.status === "BLOCKED") showBlocked(event.lock);
 	if (event.status === "CLOSED" && isAllowedCloseLockEvent(event)) finishHandover();
 	if (event.status === "CLOSED" && isKeptCloseLockEvent(event)) showDoorStaysClosed();
 });
 ```
 
-The reopen tag alone does not mean the door opened; the helper does not look at the status, so check it as well. On
-`OPEN` the controller opened the lock again: write no audit entry, count no opening and send no notification. A
+On a reopen the controller opened the lock again: write no audit entry, count no opening and send no notification. A
 reopen does not allow a close: the door is open, but closing it now is refused again, because only an open command
 starts the time. Show a hint that the locker opened again, with opening as its action, and send `openCompartment` or
 `openLock` when the user takes it (this also works on the already open lock); the door can then be closed within the
 time. Do not ask the user to just close the door after a reopen.
 
-On `BLOCKED` the reopen failed. It counts as blocked, not as a reopen: the door is still closed, so show no hint that
-the locker opened again and handle the event like any blocked lock.
+A `BLOCKED` carrying the reopen tag is a reopen that failed. It counts as blocked, not as a reopen, and
+`isReopenedLockEvent` is false for it: the door is still closed, so show no hint that the locker opened again and
+handle the event like any blocked lock. An app that needs to tell it from another blocked lock compares the status
+with `LOCK_EVENT_ACTOR_CONTROLLER` and `LOCK_EVENT_ACTION_REOPEN` itself.
 
 The controller keeps a close no open allowed, and tags it `keep close`, when the compartment is out of service
 (disabled or in maintenance) or when it gave up reopening on the third close of the lock within 3 seconds; the event
