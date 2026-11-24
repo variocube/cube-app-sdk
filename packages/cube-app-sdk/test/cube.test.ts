@@ -1001,12 +1001,23 @@ describe("fresh kiosk launch requests", () => {
 		await flush();
 		expect(cube.connection).toMatchObject({status: "unavailable", error: {code: "AUTHENTICATION_REQUIRED"}});
 		const assign = vi.fn();
-		vi.stubGlobal("window", {location: {assign, href: "https://app.example/"}});
+		const listeners: Array<{ type: string; listener: () => void }> = [];
+		vi.stubGlobal("window", {
+			location: {assign, href: "https://app.example/"},
+			addEventListener: (type: string, listener: () => void) => listeners.push({type, listener}),
+			removeEventListener: (type: string, listener: () => void) => {
+				const index = listeners.findIndex(entry => entry.type === type && entry.listener === listener);
+				if (index >= 0) listeners.splice(index, 1);
+			},
+		});
 		const session = open();
 		await ready();
 		await session.openMaintenance();
 		await flush();
 		expect(assign).toHaveBeenCalledTimes(1);
+		expect(cube.connection.status).toBe("ready");
+		listeners.filter(entry => entry.type === "pagehide").forEach(entry => entry.listener());
+		await flush();
 		expect(cube.connection.status).toBe("unavailable");
 		cube.close();
 		expect(urls()).toEqual([]);

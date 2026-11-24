@@ -255,25 +255,68 @@ describe("memory-only renewal", () => {
 });
 
 describe("ordinary maintenance navigation", () => {
-	function make(href = "https://app.example/start?language=en#route") {
+	/** `Session` is a fresh page's module where the once-per-page relaunch flag matters. */
+	function make(href = "https://app.example/start?language=en#route", Session = ControllerSession) {
 		const transport = vi.fn<typeof fetch>();
-		const session = new ControllerSession("https://controller.example", transport, {
+		const session = new Session("https://controller.example", transport, {
 			credential,
 			generation: 1,
 			expiresAt: Math.floor(Date.now() / 1000) + 600,
 		});
 		sessions.push(session);
 		const assign = vi.fn();
-		vi.stubGlobal("window", {location: {assign, href}});
-		return {session, transport, assign};
+		const listeners: Array<{ type: string; listener: () => void }> = [];
+		vi.stubGlobal("window", {
+			location: {assign, href},
+			addEventListener: (type: string, listener: () => void) => listeners.push({type, listener}),
+			removeEventListener: (type: string, listener: () => void) => {
+				const index = listeners.findIndex(entry => entry.type === type && entry.listener === listener);
+				if (index >= 0) listeners.splice(index, 1);
+			},
+		});
+		/** Only the listeners of `pagehide` run, so the event the session waits for is pinned. */
+		const pagehide = () => listeners.filter(entry => entry.type === "pagehide").forEach(entry => entry.listener());
+		return {session, transport, assign, listeners, pagehide};
 	}
-	it("navigates to the bare maintenance URL, sends no request and closes the session", async () => {
-		const {session, transport, assign} = make();
+	it("navigates to the bare maintenance URL and sends no request; the session closes only on pagehide", async () => {
+		const {session, transport, assign, pagehide} = make(undefined, (await page()).ControllerSessionImpl);
+		const invalidated = vi.fn();
+		session.onInvalidation(invalidated);
 		await session.openMaintenance();
 		expect(assign).toHaveBeenCalledTimes(1);
 		expect(assign).toHaveBeenCalledWith("https://controller.example/maintenance");
+		session.requestFreshLaunch();
 		expect(transport).not.toHaveBeenCalled();
+		await expect(session.getCredential()).resolves.toBe(credential);
+		expect(invalidated).not.toHaveBeenCalled();
+		pagehide();
+		pagehide();
+		expect(invalidated).toHaveBeenCalledTimes(1);
 		await expect(session.getCredential()).rejects.toMatchObject({code: "AUTHENTICATION_REQUIRED"});
+	});
+	it("ignores a second call while leaving", async () => {
+		const {session, assign} = make();
+		await session.openMaintenance();
+		await expect(session.openMaintenance()).resolves.toBeUndefined();
+		expect(assign).toHaveBeenCalledTimes(1);
+	});
+	it("still closes by the app's own close() and drops the pagehide listener", async () => {
+		const {session, listeners} = make();
+		const invalidated = vi.fn();
+		session.onInvalidation(invalidated);
+		await session.openMaintenance();
+		session.close();
+		expect(invalidated).toHaveBeenCalledTimes(1);
+		expect(listeners).toHaveLength(0);
+	});
+	it("stays open when the navigation fails", async () => {
+		const {session, assign, listeners} = make();
+		assign.mockImplementation(() => {
+			throw new Error("blocked");
+		});
+		await expect(session.openMaintenance()).rejects.toThrow("blocked");
+		expect(listeners).toHaveLength(0);
+		await expect(session.getCredential()).resolves.toBe(credential);
 	});
 	it("rejects navigation after session disposal", async () => {
 		const {session, assign} = make();
