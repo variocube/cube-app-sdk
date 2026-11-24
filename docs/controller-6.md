@@ -93,7 +93,10 @@ pass without its next chunk.
 `session.openMaintenance()` navigates normally to the trusted controller's `/maintenance`, with no query. It requests no
 maintenance context and passes no credential in that URL. Technician login belongs to the maintenance UI. Leave there
 returns to the terminal's app with a fresh launch and grant, not to the current URL; the controller decides, and the SDK
-requires a controller that does so.
+requires a controller that does so. The session closes on `pagehide`, when the page actually leaves, not when the
+navigation starts: until then connections keep their status, a failed navigation leaves the session open, a second call
+while leaving does nothing, and a call on a closed session rejects with `AUTHENTICATION_REQUIRED`. A page restored from
+the back/forward cache after `pagehide` stays closed.
 
 The controller relaunches the kiosk on a relaunch request or a configuration/kiosk change, not when an app credential
 expires. Whenever the SDK concludes that a fresh kiosk launch is required, it makes at most one bounded
@@ -112,9 +115,11 @@ for the trusted kiosk to reload a fresh launch (#87):
   request is redundant there but harmless: the controller refuses it once the change has cleared the current launch,
   and folds it into the same pending relaunch before that. It is kept so no authentication failure can strand a page.
 
-`session.close()`, `openMaintenance()` and page unload are deliberate ends and never ask. The controller authorizes the
-request, which carries no credential, only for an actual loopback peer and the configured app Origin. The response
-cannot issue a grant to this helper, choose navigation or trigger automatic retries.
+`session.close()`, `openMaintenance()` (once the page leaves) and page unload are deliberate ends and never ask; nor
+does the SDK ask while `openMaintenance()` is leaving, so a load cancelled by that navigation cannot relaunch the app
+over maintenance. The controller authorizes the request, which carries no credential, only for an actual loopback peer
+and the configured app Origin. The response cannot issue a grant to this helper, choose navigation or trigger automatic
+retries.
 
 ## Validation and remaining evidence
 

@@ -75,7 +75,7 @@ export interface ControllerSession {
 	readonly endpoint: string;
 	/**
 	 * Navigates to the controller's maintenance UI; Leave there launches the terminal's app afresh. Ends this
-	 * session.
+	 * session once the page leaves (`pagehide`); until then connections keep their status.
 	 */
 	openMaintenance(): Promise<void>;
 	/** Discards the credential and terminates every connection made from this session. */
@@ -88,6 +88,8 @@ export class ControllerSessionImpl implements ControllerSession {
 	#refresh: Promise<string> | undefined;
 	#timer: ReturnType<typeof setTimeout> | undefined;
 	#closed = false;
+	/** The `pagehide` listener while `openMaintenance()` waits for the page to leave. */
+	#leaving: (() => void) | undefined;
 	readonly #invalidations = new Set<() => void>();
 	readonly generation: number;
 
@@ -158,19 +160,40 @@ export class ControllerSessionImpl implements ControllerSession {
 		});
 	}
 
-	/** Navigate normally to `<endpoint>/maintenance`; technician authentication happens in the maintenance UI. */
+	/**
+	 * Navigate normally to `<endpoint>/maintenance`; technician authentication happens in the maintenance UI. The
+	 * session closes when the page actually leaves (`pagehide`), not right after the navigation starts: until then the
+	 * old page stays on screen and its connections keep their status. A failed navigation leaves the session open. A
+	 * second call while leaving does nothing; on a closed session it rejects. A page restored from the back/forward
+	 * cache stays closed.
+	 */
 	async openMaintenance(): Promise<void> {
 		if (this.#closed) throw authenticationRequired();
-		window.location.assign(new URL("/maintenance", this.endpoint).href);
-		this.close();
+		if (this.#leaving) return;
+		this.#leaving = () => this.close();
+		try {
+			window.addEventListener("pagehide", this.#leaving);
+			window.location.assign(new URL("/maintenance", this.endpoint).href);
+		}
+		catch (error) {
+			this.#stopLeaving();
+			throw error;
+		}
+	}
+
+	#stopLeaving(): void {
+		if (!this.#leaving) return;
+		window.removeEventListener("pagehide", this.#leaving);
+		this.#leaving = undefined;
 	}
 
 	/**
 	 * Asks the kiosk for a fresh launch without waiting for it. A closed session never asks: either the app ended it
-	 * deliberately, or the renewal failure that closed it has already asked.
+	 * deliberately, or the renewal failure that closed it has already asked. It does nothing either while the session
+	 * is leaving for maintenance: a load cancelled by that navigation must not relaunch the app over it.
 	 */
 	requestFreshLaunch(): void {
-		if (!this.#closed) void requestFreshLaunch(this.endpoint, this.transport);
+		if (!this.#closed && !this.#leaving) void requestFreshLaunch(this.endpoint, this.transport);
 	}
 
 	onInvalidation(listener: () => void): () => void {
@@ -181,6 +204,7 @@ export class ControllerSessionImpl implements ControllerSession {
 	close(): void {
 		if (this.#closed) return;
 		this.#closed = true;
+		this.#stopLeaving();
 		clearTimeout(this.#timer);
 		this.#credential = undefined;
 		for (const listener of [...this.#invalidations]) listener();

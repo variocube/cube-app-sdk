@@ -190,7 +190,8 @@ export type EventListener<E> = (event: E) => unknown;
  * - `ready`: authenticated and completely loaded. Reads and commands only work in this status.
  * - `unavailable`: a fresh kiosk launch is required; this connection will not recover. Unless the app ended the session
  *   (`close()`, `openMaintenance()`), the SDK has asked the controller for one (`POST /app/relaunch`, at most once per
- *   page) so the kiosk reloads the app.
+ *   page) so the kiosk reloads the app. After `openMaintenance()` the status changes only once the page has left
+ *   (`pagehide`); until then connections keep their status.
  * - `error`: the connection failed for the reason in `error` and was stopped.
  */
 export type ConnectionStatus = "disconnected" | "initializing" | "ready" | "unavailable" | "error";
