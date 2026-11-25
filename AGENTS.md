@@ -77,7 +77,7 @@ functionality; hardware simulation for development comes from the controller's o
   the controller's tags (`LOCK_EVENT_ACTOR_CONTROLLER` with `LOCK_EVENT_ACTION_REOPEN` /
   `LOCK_EVENT_ACTION_ALLOW_CLOSE` / `LOCK_EVENT_ACTION_KEEP_CLOSE`; test with `isReopenedLockEvent` /
   `isAllowedCloseLockEvent` / `isKeptCloseLockEvent`). `isReopenedLockEvent` also requires status `OPEN`: the tag on
-  `BLOCKED` is a reopen that failed and is handled like any blocked lock; the two close helpers ignore the status. A
+  `BLOCKED` is a reopen that failed and is handled like any blocked lock; the two close helpers require `CLOSED`. A
   `CLOSED` tagged allowed or kept normally stands, an untagged one of a compartment's lock is normally reopened (never
   wait for either without bound); `actor`/`action` stay open strings
 - Events (`CubeEventMap`): hardware events plus `connection`, `identity`, `occupancies`, lifecycle events, and `storage`

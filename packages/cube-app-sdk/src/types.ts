@@ -56,8 +56,8 @@ export interface LockEvent {
 	 * - `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`), on status `CLOSED`: the close was kept because an open
 	 *   shortly before allowed it (see `Cube.preventCloseAfterOpenSeconds`).
 	 * - `LOCK_EVENT_ACTION_KEEP_CLOSE` (`"keep close"`), on status `CLOSED`: the close was kept although no open
-	 *   allowed it, because the compartment is disabled or in maintenance or the controller gave up reopening on
-	 *   the third close of the lock within 3 seconds. The event does not tell which.
+	 *   allowed it, because the compartment is disabled or in maintenance or the controller gave up reopening a
+	 *   lock that closed repeatedly within a few seconds. The event does not tell which.
 	 *
 	 * While `Cube.preventCloseAfterOpenSeconds` is set, a `CLOSED` of a compartment's lock with one of the two
 	 * close tags normally stands. One with neither is normally followed by the controller's reopen within moments;

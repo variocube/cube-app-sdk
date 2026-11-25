@@ -91,8 +91,8 @@ arrives only with the next connection.
 The controller tags the `lock` events it causes itself with actor `LOCK_EVENT_ACTOR_CONTROLLER` (`"controller"`) and
 action `LOCK_EVENT_ACTION_REOPEN` (`"reopen"`), `LOCK_EVENT_ACTION_ALLOW_CLOSE` (`"allow close"`) or
 `LOCK_EVENT_ACTION_KEEP_CLOSE` (`"keep close"`). `isReopenedLockEvent(event)`, `isAllowedCloseLockEvent(event)` and
-`isKeptCloseLockEvent(event)` test for them. The two close helpers compare actor and action only; the reopen helper
-also requires status `OPEN`, because the controller puts the reopen tag on the `BLOCKED` of a failed reopen as well:
+`isKeptCloseLockEvent(event)` test for them. The close helpers require status `CLOSED`; the reopen helper requires
+`OPEN`, because the controller puts the reopen tag on the `BLOCKED` of a failed reopen as well:
 
 | Helper                    | Action        | Status    | Meaning                                                           |
 | ------------------------- | ------------- | --------- | ----------------------------------------------------------------- |
@@ -109,8 +109,8 @@ cube.addEventListener("lock", event => {
 	if (event.status === "OPEN") recordOpening(event.actor, event.action);
 	// Includes the BLOCKED of a reopen that failed, which is handled like any blocked lock.
 	if (event.status === "BLOCKED") showBlocked(event.lock);
-	if (event.status === "CLOSED" && isAllowedCloseLockEvent(event)) finishHandover();
-	if (event.status === "CLOSED" && isKeptCloseLockEvent(event)) showDoorStaysClosed();
+	if (isAllowedCloseLockEvent(event)) finishHandover();
+	if (isKeptCloseLockEvent(event)) showDoorStaysClosed();
 });
 ```
 
@@ -126,7 +126,7 @@ handle the event like any blocked lock. An app that needs to tell it from anothe
 with `LOCK_EVENT_ACTOR_CONTROLLER` and `LOCK_EVENT_ACTION_REOPEN` itself.
 
 The controller keeps a close no open allowed, and tags it `keep close`, when the compartment is out of service
-(disabled or in maintenance) or when it gave up reopening on the third close of the lock within 3 seconds; the event
+(disabled or in maintenance) or when it gave up reopening a lock that closed repeatedly within a few seconds; the event
 does not tell which. A close an open allowed stays `allow close` in those cases too. So while the setting is on, a
 `CLOSED` of a compartment's lock tagged `allow close` or `keep close` normally stands, and one with neither tag is
 normally followed by a reopen within moments. Such an untagged `CLOSED` can still carry the actor and action of an

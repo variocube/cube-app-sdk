@@ -29,7 +29,7 @@ and a changed setting arrives only with the next connection. `lock` events the c
 `OPEN`: no opening by anyone, so no audit entry, count or notification. It is false for the tagged `BLOCKED` of a
 reopen that failed, which is handled like any blocked lock. `isAllowedCloseLockEvent(event)` recognizes a close an
 open allowed, and `isKeptCloseLockEvent(event)` a close kept without one because the compartment is out of service or
-the controller gave up reopening; both arrive on `CLOSED`, and these two helpers compare actor and action only. A
+the controller gave up reopening; both arrive on `CLOSED`, which these two helpers require. A
 `CLOSED` of a compartment's lock with one of the two close tags normally stands; one with neither is normally
 followed by a reopen, for which an app waits only a bounded time before going by the lock status. A controller before
 controller-rs#217 sends no `keep close` and leaves those closes untagged, without a reopen. A reopen does not start

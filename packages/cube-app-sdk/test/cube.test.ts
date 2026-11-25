@@ -1363,10 +1363,10 @@ describe("close only after opening", () => {
 		]).toEqual(["controller", "reopen", "allow close", "keep close"]);
 	});
 
-	it("recognizes the controller's close tags by actor and action together, whatever the status", () => {
-		const reopened = {actor: "controller", action: "reopen"};
-		const allowed = {actor: "controller", action: "allow close"};
-		const kept = {actor: "controller", action: "keep close"};
+	it("recognizes the controller's close tags by status, actor and action together", () => {
+		const reopened = {status: "CLOSED", actor: "controller", action: "reopen"} as const;
+		const allowed = {status: "CLOSED", actor: "controller", action: "allow close"} as const;
+		const kept = {status: "CLOSED", actor: "controller", action: "keep close"} as const;
 		expect(isAllowedCloseLockEvent(allowed)).toBe(true);
 		expect(isKeptCloseLockEvent(kept)).toBe(true);
 		// A kept close is its own tag: allowed is not widened to it, nor the other way round.
@@ -1374,26 +1374,26 @@ describe("close only after opening", () => {
 		expect(isKeptCloseLockEvent(allowed)).toBe(false);
 		expect(isAllowedCloseLockEvent(reopened)).toBe(false);
 		expect(isKeptCloseLockEvent(reopened)).toBe(false);
-		// The status is not part of the two close tags.
-		expect(isAllowedCloseLockEvent({lock: "lock-1", status: "CLOSED", ...allowed} as LockEvent)).toBe(true);
-		expect(isAllowedCloseLockEvent({lock: "lock-1", status: "OPEN", ...allowed} as LockEvent)).toBe(true);
-		expect(isKeptCloseLockEvent({lock: "lock-1", status: "CLOSED", ...kept} as LockEvent)).toBe(true);
-		expect(isKeptCloseLockEvent({lock: "lock-1", status: "BLOCKED", ...kept} as LockEvent)).toBe(true);
+		// The controller tags only a CLOSED: the same tag on an app's own OPEN or on a BLOCKED is not a close.
+		expect(isAllowedCloseLockEvent({...allowed, status: "OPEN"})).toBe(false);
+		expect(isAllowedCloseLockEvent({...allowed, status: "BLOCKED"})).toBe(false);
+		expect(isKeptCloseLockEvent({...kept, status: "OPEN"})).toBe(false);
+		expect(isKeptCloseLockEvent({...kept, status: "BLOCKED"})).toBe(false);
 		for (
-			const other of [
-				{},
-				{actor: "controller"},
-				{action: "allow close"},
-				{action: "keep close"},
+			const other of <Array<Pick<LockEvent, "status" | "actor" | "action">>> [
+				{status: "CLOSED"},
+				{status: "CLOSED", actor: "controller"},
+				{status: "CLOSED", action: "allow close"},
+				{status: "CLOSED", action: "keep close"},
 				// An app is free to name its own action like the controller's.
-				{actor: "customer", action: "allow close"},
-				{actor: "customer", action: "keep close"},
-				{actor: "app:app-a@terminal", action: "keep close"},
-				{actor: "controller", action: "newer tag"},
-				{actor: "controller", action: "allow-close"},
-				{actor: "controller", action: "keep-close"},
-				{actor: "controller", action: "kept close"},
-				{actor: "Controller", action: "allow close"},
+				{status: "CLOSED", actor: "customer", action: "allow close"},
+				{status: "CLOSED", actor: "customer", action: "keep close"},
+				{status: "CLOSED", actor: "app:app-a@terminal", action: "keep close"},
+				{status: "CLOSED", actor: "controller", action: "newer tag"},
+				{status: "CLOSED", actor: "controller", action: "allow-close"},
+				{status: "CLOSED", actor: "controller", action: "keep-close"},
+				{status: "CLOSED", actor: "controller", action: "kept close"},
+				{status: "CLOSED", actor: "Controller", action: "allow close"},
 			]
 		) {
 			expect(isAllowedCloseLockEvent(other)).toBe(false);
@@ -1401,8 +1401,10 @@ describe("close only after opening", () => {
 		}
 		expectTypeOf(isAllowedCloseLockEvent).returns.toEqualTypeOf<boolean>();
 		expectTypeOf(isKeptCloseLockEvent).returns.toEqualTypeOf<boolean>();
-		expectTypeOf(isAllowedCloseLockEvent).parameter(0).toEqualTypeOf<Pick<LockEvent, "actor" | "action">>();
-		expectTypeOf(isKeptCloseLockEvent).parameter(0).toEqualTypeOf<Pick<LockEvent, "actor" | "action">>();
+		expectTypeOf(isAllowedCloseLockEvent).parameter(0).toEqualTypeOf<
+			Pick<LockEvent, "status" | "actor" | "action">
+		>();
+		expectTypeOf(isKeptCloseLockEvent).parameter(0).toEqualTypeOf<Pick<LockEvent, "status" | "actor" | "action">>();
 	});
 
 	it("recognizes a reopen only on the tagged OPEN, not on the BLOCKED of a reopen that failed", () => {

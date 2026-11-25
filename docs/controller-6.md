@@ -68,12 +68,14 @@ attribution: the controller records the app's `actor` (at most 128 bytes) instea
 `app:<id>@<terminal>`, and `action`, on the opening and on the resulting `lock` event.
 
 While `preventCloseAfterOpenSeconds` is set, the controller reopens a close of a box's lock that does not fall within
-that time (plus 5 seconds of detection grace) after an Open command of that lock. It keeps such a close on a box that
-is out of service (maintenance required or disabled) and on the third close of the lock within three seconds (it
-gives up reopening). A lock that belongs to no box keeps its close as well. Every Open command arms the close,
-whoever sends it, and opening an already open lock arms it again. The controller's own reopen does not arm: after
-one, a close stands only once a new open command was sent; an app sends `openBox` or `openLock` for that. There is no
-arm command: the SDK sends no request for this rule and adds none.
+that time (plus a short detection grace) after an Open command of that lock. It keeps such a close on a box that
+is out of service (maintenance required or disabled) and when a lock closes repeatedly within a few seconds (it
+gives up reopening). The exact times are in the controller's
+[close rules](https://github.com/variocube/controller-rs/blob/main/docs/spec/drivers.md#close-rules). A lock that
+belongs to no box keeps its close as well. Every Open command arms the close, whoever sends it, and opening an already
+open lock arms it again. The controller's own reopen does not arm: after one, a close stands only once a new open
+command was sent; an app sends `openBox` or `openLock` for that. There is no arm command: the SDK sends no request for
+this rule and adds none.
 
 `lock {generation,revision,lock,status,compartmentNumber?,actor?,action?}` events carry the controller's own tags.
 The SDK passes them through as open strings and exports them as `LOCK_EVENT_ACTOR_CONTROLLER`,
@@ -111,7 +113,7 @@ send no notification. A `BLOCKED` carrying the tag is a reopen that failed; it c
 and apps handle it like any blocked lock (safecube#1135). `isReopenedLockEvent` therefore requires status `OPEN`
 besides actor and action and is false for the tagged `BLOCKED`; the wire is unchanged, so an app that needs to
 recognise a failed reopen compares status, actor and action itself. `isAllowedCloseLockEvent` and
-`isKeptCloseLockEvent` compare actor and action only.
+`isKeptCloseLockEvent` also require status `CLOSED`, the only status the controller tags with them.
 
 Initial storage follows `initialState`, then `ready {generation,revision}` commits authenticated readiness. Every
 publication uses the contiguous per-session revision, including storage chunks and the ready barrier:
