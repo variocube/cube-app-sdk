@@ -24,7 +24,19 @@ import React, {createContext, PropsWithChildren, useCallback, useContext, useEff
 // `dprint-ignore` because dprint 0.77.0 wrongly strips the `type` from `export type *`.
 // dprint-ignore
 export type * from "@variocube/cube-app-sdk";
-export { bootstrapSession, CubeError, Symbology, validateCodeReaderConfig } from "@variocube/cube-app-sdk";
+export {
+	bootstrapSession,
+	CubeError,
+	isAllowedCloseLockEvent,
+	isKeptCloseLockEvent,
+	isReopenedLockEvent,
+	LOCK_EVENT_ACTION_ALLOW_CLOSE,
+	LOCK_EVENT_ACTION_KEEP_CLOSE,
+	LOCK_EVENT_ACTION_REOPEN,
+	LOCK_EVENT_ACTOR_CONTROLLER,
+	Symbology,
+	validateCodeReaderConfig,
+} from "@variocube/cube-app-sdk";
 
 export type Locks = Record<string, LockStatus>;
 
@@ -241,6 +253,28 @@ const subscribeIdentity: Subscription = (cube, listener) => cube.addEventListene
 /** The cube and installed app; undefined while unknown. Tokens come from `useCube().getToken()`. */
 export function useIdentity(): CubeIdentity | undefined {
 	return useCubeSnapshot(readIdentity, subscribeIdentity);
+}
+
+const readPreventCloseAfterOpenSeconds = (cube: Cube) => cube.preventCloseAfterOpenSeconds;
+// The setting arrives with the initial state. `identity` announces a connection's first one and the reset that
+// drops it. The SDK accepts a further snapshot of the same connection only while ready and leaves ready for it,
+// which `connection` announces; a second snapshot before `ready` fails the connection and resets the setting.
+const subscribePreventCloseAfterOpenSeconds: Subscription = (cube, listener) => {
+	const unsubscribe = [
+		cube.addEventListener("identity", listener),
+		cube.addEventListener("connection", listener),
+	];
+	return () => unsubscribe.forEach(remove => remove());
+};
+
+/**
+ * The seconds after an open within which the door may be closed before the controller opens it again
+ * (`cube.preventCloseAfterOpenSeconds`). Undefined while the rule is off, before the initial state of a connection,
+ * and on a controller that does not report the setting. A changed setting arrives only with the next connection.
+ * The controller's own reopen does not start the time; only an open command does.
+ */
+export function usePreventCloseAfterOpenSeconds(): number | undefined {
+	return useCubeSnapshot(readPreventCloseAfterOpenSeconds, subscribePreventCloseAfterOpenSeconds);
 }
 
 const readOccupancies = (cube: Cube) => readResult(cube, () => cube.occupancies.list());
